@@ -686,25 +686,24 @@ select{cursor:pointer;}
 var SUPA_URL = 'https://yvsulnkwirccdpnzmesm.supabase.co/rest/v1';
 var SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c3Vsbmt3aXJjY2RwbnptZXNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5Mzk0MzgsImV4cCI6MjA4OTUxNTQzOH0.Z1DitGY405QHmrFhQxN1VJI2us8aLU9gfwhiuUO2qy4';
 
-function supaHeaders(extra) {
-  var h = {
-    'apikey': SUPA_KEY,
-    'Authorization': 'Bearer ' + SUPA_KEY,
-    'Content-Type': 'application/json',
-    'Prefer': 'return=representation'
-  };
-  if (extra) Object.assign(h, extra);
-  return h;
-}
+// Headers base — SIN Prefer (para GET)
+var H_BASE = {
+  'apikey':        SUPA_KEY,
+  'Authorization': 'Bearer ' + SUPA_KEY,
+  'Content-Type':  'application/json'
+};
+// Headers para escritura — CON Prefer
+var H_WRITE = Object.assign({}, H_BASE, { 'Prefer': 'return=representation' });
+var H_DEL   = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal' });
 
 function supaGet(table, query) {
   return fetch(SUPA_URL + '/' + table + '?' + (query || ''), {
     method: 'GET',
-    headers: supaHeaders()
+    headers: H_BASE          // ← sin Prefer: GET no lo acepta
   }).then(function(r) {
-    return r.json().then(function(d) {
-      if (!r.ok) throw new Error(JSON.stringify(d));
-      return d;
+    return r.text().then(function(t) {
+      if (!r.ok) throw new Error('GET ' + table + ' → ' + r.status + ': ' + t);
+      return t ? JSON.parse(t) : [];
     });
   });
 }
@@ -712,12 +711,12 @@ function supaGet(table, query) {
 function supaPost(table, body) {
   return fetch(SUPA_URL + '/' + table, {
     method: 'POST',
-    headers: supaHeaders(),
+    headers: H_WRITE,
     body: JSON.stringify(body)
   }).then(function(r) {
-    return r.json().then(function(d) {
-      if (!r.ok) throw new Error(JSON.stringify(d));
-      return d;
+    return r.text().then(function(t) {
+      if (!r.ok) throw new Error('POST ' + table + ' → ' + r.status + ': ' + t);
+      return t ? JSON.parse(t) : null;
     });
   });
 }
@@ -725,12 +724,12 @@ function supaPost(table, body) {
 function supaPatch(table, id, body) {
   return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
     method: 'PATCH',
-    headers: supaHeaders(),
+    headers: H_WRITE,
     body: JSON.stringify(body)
   }).then(function(r) {
-    return r.json().then(function(d) {
-      if (!r.ok) throw new Error(JSON.stringify(d));
-      return d;
+    return r.text().then(function(t) {
+      if (!r.ok) throw new Error('PATCH ' + table + ' → ' + r.status + ': ' + t);
+      return t ? JSON.parse(t) : null;
     });
   });
 }
@@ -738,7 +737,7 @@ function supaPatch(table, id, body) {
 function supaDelete(table, id) {
   return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
     method: 'DELETE',
-    headers: supaHeaders({ 'Prefer': 'return=minimal' })
+    headers: H_DEL
   }).then(function(r) {
     if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
   });
