@@ -1123,7 +1123,7 @@ function renderDashboard() {
     var canNav = currentUser && (currentUser.esGlobalAdmin || currentUser.esGlobalViewer || currentUser.unidad===k);
     return '<div class="unidad-card" onclick="' + (canNav ? 'showView(\''+k+'\',document.getElementById(\'nav-'+k+'\'))' : '') + '">' +
       '<div class="uc-header">' +
-        '<div class="uc-icon" style="background:'+u.bg+';width:36px;height:36px;border-radius:7px;display:flex;align-items:center;justify-content:center;"><img src="'+(UNIT_NAV_LOGOS[k]||'')+"" style="width:26px;height:26px;object-fit:contain;" /></div>' +
+        '<div class="uc-icon" style="background:'+u.bg+';width:36px;height:36px;border-radius:7px;display:flex;align-items:center;justify-content:center;">'+'<img src="'+(UNIT_NAV_LOGOS[k]||'')+'" style="width:26px;height:26px;object-fit:contain;"/></div>' +
         '<div><div class="uc-title">'+u.nombre+'</div><div class="uc-sub">'+pl.length+' proyecto'+(pl.length!==1?'s':'')+'</div></div>' +
         '<div class="uc-arrow" style="color:'+u.color+'">→</div>' +
       '</div>' +
@@ -1228,7 +1228,7 @@ function renderUnidad(u) {
 
   document.getElementById('mainContent').innerHTML =
     '<div class="module-header" style="background:'+unidad.color+'">' +
-      '<div class="module-icon" style="background:rgba(255,255,255,.15);border-radius:8px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;"><img src="'+(UNIT_HDR_LOGOS[u]||'')+"" style="width:34px;height:34px;object-fit:contain;" /></div>' +
+      '<div class="module-icon" style="background:rgba(255,255,255,.15);border-radius:8px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;">'+'<img src="'+(UNIT_HDR_LOGOS[u]||'')+'" style="width:34px;height:34px;object-fit:contain;"/></div>' +
       '<div class="module-info"><h2>'+unidad.nombre+'</h2><p>'+plist.length+' proyecto'+(plist.length!==1?'s':'')+' registrado'+(plist.length!==1?'s':'')+'</p></div>' +
       '<div class="module-kpis"><div class="mod-kpi"><div class="mod-kpi-num">'+af+'%</div><div class="mod-kpi-lbl">Físico</div></div><div class="mod-kpi"><div class="mod-kpi-num">'+afin+'%</div><div class="mod-kpi-lbl">Financiero</div></div><div class="mod-kpi"><div class="mod-kpi-num">'+plist.filter(function(p){return p.estado==='En Ejecución';}).length+'</div><div class="mod-kpi-lbl">En Ejecución</div></div></div>' +
     '</div>' +
