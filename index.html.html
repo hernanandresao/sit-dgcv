@@ -686,23 +686,24 @@ select{cursor:pointer;}
 var SUPA_URL = 'https://furbzmtimdvsterqenff.supabase.co/rest/v1';
 var SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1cmJ6bXRpbWR2c3RlcnFlbmZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NDI4OTcsImV4cCI6MjA4OTUxODg5N30.EFbDE4dU514Ua9SNQ5y-LgyVp7QRJe1Gf5H98sYu5Eg';
 
-// Headers base — SIN Prefer (para GET)
-var H_BASE = {
-  'apikey':        SUPA_KEY,
-  'Authorization': 'Bearer ' + SUPA_KEY,
-  'Content-Type':  'application/json'
-};
-// Headers para escritura — CON Prefer
-var H_WRITE = Object.assign({}, H_BASE, { 'Prefer': 'return=representation' });
+// Generar UUID en el cliente — evita depender de Supabase para obtener el ID
+function genUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+var H_BASE  = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
+var H_WRITE = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal' });
 var H_DEL   = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal' });
 
 function supaGet(table, query) {
   return fetch(SUPA_URL + '/' + table + '?' + (query || ''), {
-    method: 'GET',
-    headers: H_BASE          // ← sin Prefer: GET no lo acepta
+    method: 'GET', headers: H_BASE
   }).then(function(r) {
     return r.text().then(function(t) {
-      if (!r.ok) throw new Error('GET ' + table + ' → ' + r.status + ': ' + t);
+      if (!r.ok) throw new Error('GET ' + table + ' [' + r.status + ']: ' + t);
       return t ? JSON.parse(t) : [];
     });
   });
@@ -710,34 +711,28 @@ function supaGet(table, query) {
 
 function supaPost(table, body) {
   return fetch(SUPA_URL + '/' + table, {
-    method: 'POST',
-    headers: H_WRITE,
-    body: JSON.stringify(body)
+    method: 'POST', headers: H_WRITE, body: JSON.stringify(body)
   }).then(function(r) {
     return r.text().then(function(t) {
-      if (!r.ok) throw new Error('POST ' + table + ' → ' + r.status + ': ' + t);
-      return t ? JSON.parse(t) : null;
+      if (!r.ok) throw new Error('POST ' + table + ' [' + r.status + ']: ' + t);
+      // return=minimal → 201 sin body, el ID ya lo generamos nosotros
     });
   });
 }
 
 function supaPatch(table, id, body) {
   return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
-    method: 'PATCH',
-    headers: H_WRITE,
-    body: JSON.stringify(body)
+    method: 'PATCH', headers: H_WRITE, body: JSON.stringify(body)
   }).then(function(r) {
     return r.text().then(function(t) {
-      if (!r.ok) throw new Error('PATCH ' + table + ' → ' + r.status + ': ' + t);
-      return t ? JSON.parse(t) : null;
+      if (!r.ok) throw new Error('PATCH ' + table + ' [' + r.status + ']: ' + t);
     });
   });
 }
 
 function supaDelete(table, id) {
   return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
-    method: 'DELETE',
-    headers: H_DEL
+    method: 'DELETE', headers: H_DEL
   }).then(function(r) {
     if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
   });
@@ -859,23 +854,32 @@ function persistirProyecto(unidad, proj) {
   var mI  = parseFloat(proj.montoContratoInicial) || 0;
   var mM  = parseFloat(proj.montoModificacion) || 0;
   var vig = mM > 0 ? mM : mI;
+
+  // Limpiar undefined del objeto antes de enviar a Supabase JSONB
+  var dataLimpia = JSON.parse(JSON.stringify(proj));
+
   var row = {
     unidad:            unidad,
-    proyecto:          proj.proyecto || '',
-    departamento:      proj.departamento || null,
-    estado:            proj.estado || null,
-    avance_fisico:     parseFloat(proj.avanceFisico) || 0,
+    proyecto:          proj.proyecto          || '',
+    departamento:      proj.departamento       || null,
+    estado:            proj.estado             || null,
+    avance_fisico:     parseFloat(proj.avanceFisico)     || 0,
     avance_financiero: parseFloat(proj.avanceFinanciero) || 0,
-    total_devengado:   parseFloat(proj.totalDevengado) || 0,
+    total_devengado:   parseFloat(proj.totalDevengado)   || 0,
     monto_vigente:     vig,
-    data:              proj
+    data:              dataLimpia
   };
+
   if (proj._sid) {
-    return supaPatch('proyectos', proj._sid, row).then(function() { return proj._sid; });
+    // UPDATE
+    return supaPatch('proyectos', proj._sid, row)
+      .then(function() { return proj._sid; });
   } else {
-    return supaPost('proyectos', row).then(function(res) {
-      return Array.isArray(res) ? res[0].id : res.id;
-    });
+    // INSERT — UUID generado en cliente, no dependemos de la respuesta
+    var newId = genUUID();
+    row.id = newId;
+    return supaPost('proyectos', row)
+      .then(function() { return newId; });
   }
 }
 
@@ -1605,21 +1609,26 @@ function saveProject() {
   showView(u, document.getElementById('nav-' + u));
   showBanner(isNew ? '✓ Proyecto "' + proj.proyecto.slice(0,40) + '" registrado exitosamente' : '✓ Proyecto actualizado correctamente');
 
-  // Save to Supabase (async — doesn't block the UI)
+  // Save to Supabase (async — no bloquea la UI)
   persistirProyecto(u, proj)
     .then(function(newId) {
-      // Attach Supabase ID to local object so future edits do UPDATE
       if (isNew) {
         var localIdx = DB[u].length - 1;
-        if (DB[u][localIdx] && !DB[u][localIdx]._sid) DB[u][localIdx]._sid = newId;
-        proj._sid = newId;
+        if (DB[u][localIdx] && !DB[u][localIdx]._sid) {
+          DB[u][localIdx]._sid = newId;
+          proj._sid = newId;
+        }
       }
       saveLocalDB();
-      showToast(isNew ? 'Guardado en base de datos.' : 'Actualizado en base de datos.', 'ok');
+      showToast('✓ Guardado en base de datos Supabase.', 'ok');
     })
     .catch(function(e) {
-      saveLocalDB(); // Keep local copy
-      showToast('Error al guardar en BD: ' + e.message + '. Dato guardado localmente.', 'err');
+      saveLocalDB();
+      // Mostrar error completo en pantalla para diagnóstico
+      var msg = 'Error al guardar en BD: ' + e.message;
+      showToast(msg, 'err');
+      // También mostrar en alerta para que sea imposible de ignorar
+      setTimeout(function() { alert('⚠️ ' + msg + '\n\nEl proyecto quedó guardado localmente pero NO en Supabase.\nRevise la conexión.'); }, 500);
     });
 }
 
