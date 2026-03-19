@@ -1,41 +1,1684 @@
--- TABLA DE PROYECTOS
-CREATE TABLE IF NOT EXISTS proyectos (
-  id               UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  unidad           TEXT NOT NULL,
-  proyecto         TEXT NOT NULL,
-  departamento     TEXT,
-  estado           TEXT,
-  avance_fisico    DECIMAL(5,2) DEFAULT 0,
-  avance_financiero DECIMAL(5,2) DEFAULT 0,
-  total_devengado  DECIMAL(18,2) DEFAULT 0,
-  monto_vigente    DECIMAL(18,2) DEFAULT 0,
-  data             JSONB NOT NULL DEFAULT '{}',
-  created_at       TIMESTAMPTZ DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ DEFAULT NOW()
-);
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SIT — Sistema de Seguimiento de Proyectos DGCV</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --az1:#002B5C;--az2:#004A99;--az3:#1268C4;--az4:#3D8ED9;--az5:#7DBFF0;--az6:#D6EBF9;--az7:#EDF5FC;
+  --verde:#0D7A4E;--verde-l:#E3F5EE;
+  --rojo:#C0392B;--rojo-l:#FBEAEA;
+  --amarillo:#B8620A;--amarillo-l:#FDF3E3;
+  --gris1:#1C2B3A;--gris2:#3D4F60;--gris3:#7B8FA0;--gris4:#B8C6D0;--gris5:#E8EFF4;--gris6:#F4F7FA;
+  --border:#D0DCE6;
+  --font:'IBM Plex Sans',sans-serif;
+  --mono:'IBM Plex Mono',monospace;
+  --shadow:0 1px 3px rgba(0,42,90,.08),0 4px 12px rgba(0,42,90,.06);
+}
 
--- Índices para búsquedas rápidas
-CREATE INDEX IF NOT EXISTS idx_proy_unidad ON proyectos(unidad);
-CREATE INDEX IF NOT EXISTS idx_proy_estado ON proyectos(estado);
+html,body{height:100%;overflow:hidden;}
+body{font-family:var(--font);background:var(--gris6);color:var(--gris1);font-size:14px;display:flex;flex-direction:column;}
 
--- Auto-actualizar updated_at
-CREATE OR REPLACE FUNCTION set_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
-$$ LANGUAGE plpgsql;
+/* ═══════════ TOPBAR ═══════════ */
+.topbar{
+  background:var(--az1);color:#fff;
+  display:flex;align-items:center;gap:14px;
+  padding:0 20px;height:52px;flex-shrink:0;
+  border-bottom:2px solid var(--az3);
+}
+.topbar-escudo{
+  width:32px;height:32px;background:rgba(255,255,255,.12);border-radius:5px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.topbar-escudo svg{width:20px;height:20px;}
+.topbar-brand{flex:1;}
+.topbar-brand h1{font-size:13px;font-weight:600;letter-spacing:.3px;}
+.topbar-brand p{font-size:10px;opacity:.6;margin-top:1px;}
+.topbar-user{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,.08);padding:5px 12px;border-radius:20px;cursor:pointer;
+  font-size:12px;transition:.2s;
+}
+.topbar-user:hover{background:rgba(255,255,255,.15);}
+.topbar-user .avatar{
+  width:22px;height:22px;border-radius:50%;
+  background:var(--az4);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;
+}
+.topbar-fecha{font-size:10px;opacity:.5;font-family:var(--mono);}
 
-DROP TRIGGER IF EXISTS trg_updated ON proyectos;
-CREATE TRIGGER trg_updated
-  BEFORE UPDATE ON proyectos
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+/* ═══════════ LAYOUT ═══════════ */
+.app{display:flex;flex:1;overflow:hidden;}
 
--- Seguridad: permitir acceso con clave pública
-ALTER TABLE proyectos ENABLE ROW LEVEL SECURITY;
+/* ═══════════ SIDEBAR NAV ═══════════ */
+.sidenav{
+  width:220px;background:var(--az1);flex-shrink:0;
+  display:flex;flex-direction:column;overflow-y:auto;
+  border-right:1px solid rgba(255,255,255,.06);
+}
+.sidenav-section{padding:16px 14px 6px;font-size:10px;font-weight:600;letter-spacing:1px;color:rgba(255,255,255,.3);text-transform:uppercase;}
+.nav-item{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 16px;cursor:pointer;color:rgba(255,255,255,.6);
+  font-size:12.5px;transition:.15s;border-left:3px solid transparent;
+  position:relative;
+}
+.nav-item:hover{color:#fff;background:rgba(255,255,255,.06);}
+.nav-item.active{color:#fff;background:rgba(61,142,217,.2);border-left-color:var(--az4);}
+.nav-item .nav-icon{width:16px;height:16px;flex-shrink:0;opacity:.7;}
+.nav-item.active .nav-icon{opacity:1;}
+.nav-badge{
+  margin-left:auto;background:var(--az3);color:#fff;
+  font-size:9px;padding:1px 6px;border-radius:10px;font-family:var(--mono);
+}
+.nav-badge.warn{background:var(--amarillo);}
+.sidenav-bottom{margin-top:auto;padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);}
+.logout-btn{
+  display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.4);
+  font-size:12px;cursor:pointer;padding:6px 0;transition:.2s;
+}
+.logout-btn:hover{color:rgba(255,255,255,.7);}
 
-DROP POLICY IF EXISTS "acceso_total" ON proyectos;
-CREATE POLICY "acceso_total" ON proyectos
-  FOR ALL TO anon
-  USING (true) WITH CHECK (true);
+/* ═══════════ CONTENT ═══════════ */
+.content{flex:1;overflow-y:auto;padding:20px 24px;}
 
--- Verificación
-SELECT 'Tabla proyectos creada correctamente' AS resultado;
+/* ═══════════ PAGE HEADER ═══════════ */
+.page-header{margin-bottom:20px;}
+.page-header h2{font-size:18px;font-weight:600;color:var(--az1);}
+.page-header p{font-size:12px;color:var(--gris3);margin-top:3px;}
+.page-actions{display:flex;gap:8px;margin-top:12px;}
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:7px 14px;border-radius:6px;font-size:12px;font-weight:500;
+  cursor:pointer;transition:.15s;border:none;font-family:var(--font);
+}
+.btn-primary{background:var(--az2);color:#fff;}
+.btn-primary:hover{background:var(--az3);}
+.btn-outline{background:#fff;color:var(--az2);border:1px solid var(--border);}
+.btn-outline:hover{background:var(--az7);border-color:var(--az4);}
+.btn-danger{background:var(--rojo-l);color:var(--rojo);border:1px solid #f0bebe;}
+.btn-danger:hover{background:#f8d7d7;}
+
+/* ═══════════ KPI CARDS ═══════════ */
+.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px;}
+.kpi-card{
+  background:#fff;border-radius:8px;border:1px solid var(--border);
+  padding:14px 16px;position:relative;overflow:hidden;
+}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
+.kpi-card.az::before{background:var(--az3);}
+.kpi-card.verde::before{background:var(--verde);}
+.kpi-card.amarillo::before{background:#E8921A;}
+.kpi-card.rojo::before{background:var(--rojo);}
+.kpi-card.gris::before{background:var(--gris3);}
+.kpi-num{font-size:26px;font-weight:300;color:var(--az1);font-family:var(--mono);line-height:1;}
+.kpi-lbl{font-size:11px;color:var(--gris3);margin-top:5px;font-weight:500;}
+.kpi-sub{font-size:10px;margin-top:3px;}
+.kpi-sub.ok{color:var(--verde);}
+.kpi-sub.warn{color:var(--amarillo);}
+.kpi-sub.danger{color:var(--rojo);}
+
+/* ═══════════ UNIDADES GRID ═══════════ */
+.unidades-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px;}
+.unidad-card{
+  background:#fff;border-radius:8px;border:1px solid var(--border);
+  padding:16px;cursor:pointer;transition:.2s;
+}
+.unidad-card:hover{border-color:var(--az4);box-shadow:var(--shadow);}
+.unidad-card:hover .uc-arrow{opacity:1;transform:translateX(3px);}
+.uc-header{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px;}
+.uc-icon{
+  width:36px;height:36px;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.uc-icon svg{width:18px;height:18px;}
+.uc-title{font-size:13px;font-weight:600;color:var(--az1);line-height:1.3;}
+.uc-sub{font-size:11px;color:var(--gris3);margin-top:2px;}
+.uc-arrow{opacity:0;transition:.2s;color:var(--az3);font-size:16px;margin-left:auto;}
+.uc-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;}
+.uc-stat{background:var(--gris6);border-radius:5px;padding:7px 10px;}
+.uc-stat-num{font-size:16px;font-weight:500;color:var(--az1);font-family:var(--mono);}
+.uc-stat-lbl{font-size:10px;color:var(--gris3);margin-top:1px;}
+.uc-bar-row{display:flex;align-items:center;gap:6px;margin-top:6px;}
+.uc-bar-lbl{font-size:10px;color:var(--gris3);width:52px;}
+.uc-bar-track{flex:1;height:4px;background:var(--gris5);border-radius:2px;overflow:hidden;}
+.uc-bar-fill{height:100%;border-radius:2px;transition:.5s;}
+.uc-bar-pct{font-size:10px;color:var(--gris2);width:28px;text-align:right;font-family:var(--mono);}
+
+/* ═══════════ TABLE ═══════════ */
+.table-wrap{background:#fff;border-radius:8px;border:1px solid var(--border);overflow:hidden;}
+.table-toolbar{
+  display:flex;align-items:center;gap:10px;padding:12px 16px;
+  border-bottom:1px solid var(--gris5);flex-wrap:wrap;
+}
+.table-toolbar h3{font-size:13px;font-weight:600;flex:1;}
+.search-box{
+  display:flex;align-items:center;gap:6px;background:var(--gris6);
+  border:1px solid var(--border);border-radius:6px;padding:5px 10px;
+}
+.search-box input{background:none;border:none;outline:none;font-size:12px;color:var(--gris1);width:160px;font-family:var(--font);}
+.filter-select{
+  background:var(--gris6);border:1px solid var(--border);border-radius:6px;
+  padding:5px 10px;font-size:12px;color:var(--gris1);outline:none;font-family:var(--font);cursor:pointer;
+}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.tbl th{
+  background:var(--gris6);padding:8px 12px;text-align:left;
+  font-size:10px;font-weight:600;color:var(--gris3);letter-spacing:.5px;text-transform:uppercase;
+  border-bottom:1px solid var(--border);white-space:nowrap;
+}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--gris5);vertical-align:middle;}
+.tbl tr:hover td{background:var(--az7);}
+.tbl tr:last-child td{border-bottom:none;}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;}
+.pill.ejec{background:var(--verde-l);color:var(--verde);}
+.pill.proc{background:var(--az6);color:var(--az2);}
+.pill.susp{background:var(--amarillo-l);color:var(--amarillo);}
+.pill.term{background:var(--gris5);color:var(--gris2);}
+.pill::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor;}
+.mini-bar{width:70px;height:5px;background:var(--gris5);border-radius:2px;overflow:hidden;display:inline-block;}
+.mini-bar-fill{height:100%;border-radius:2px;}
+.az-fill{background:var(--az3);}
+.gr-fill{background:var(--verde);}
+.tbl-actions{display:flex;gap:4px;}
+.tbl-btn{
+  padding:4px 8px;border-radius:4px;font-size:10px;cursor:pointer;
+  background:var(--gris5);border:none;color:var(--gris2);font-family:var(--font);transition:.15s;
+}
+.tbl-btn:hover{background:var(--az6);color:var(--az2);}
+.tbl-btn.edit{background:var(--az7);color:var(--az2);}
+.tbl-btn.edit:hover{background:var(--az6);}
+
+/* ═══════════ MODAL OVERLAY ═══════════ */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,20,50,.55);
+  display:flex;align-items:flex-start;justify-content:center;
+  overflow-y:auto;padding:20px;z-index:100;
+  opacity:0;pointer-events:none;transition:opacity .2s;
+}
+.modal-overlay.open{opacity:1;pointer-events:all;}
+.modal{
+  background:#fff;border-radius:10px;width:100%;max-width:860px;
+  box-shadow:0 20px 60px rgba(0,20,50,.25);
+  transform:translateY(-10px);transition:transform .2s;flex-shrink:0;
+}
+.modal-overlay.open .modal{transform:translateY(0);}
+.modal-header{
+  background:var(--az1);color:#fff;padding:16px 22px;
+  border-radius:10px 10px 0 0;display:flex;align-items:center;gap:10px;
+}
+.modal-header h3{font-size:14px;font-weight:600;flex:1;}
+.modal-close{
+  width:28px;height:28px;background:rgba(255,255,255,.12);border-radius:5px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;
+  color:#fff;transition:.15s;border:none;
+}
+.modal-close:hover{background:rgba(255,255,255,.22);}
+.modal-body{padding:22px;}
+.modal-footer{
+  padding:14px 22px;border-top:1px solid var(--gris5);
+  display:flex;justify-content:flex-end;gap:8px;background:var(--gris6);
+  border-radius:0 0 10px 10px;
+}
+
+/* ═══════════ FORM SECTIONS ═══════════ */
+.form-section{margin-bottom:22px;}
+.form-section-title{
+  font-size:11px;font-weight:600;color:var(--az2);letter-spacing:.8px;text-transform:uppercase;
+  padding-bottom:8px;border-bottom:2px solid var(--az6);margin-bottom:14px;
+  display:flex;align-items:center;gap:6px;
+}
+.form-section-title svg{width:13px;height:13px;}
+.form-grid{display:grid;gap:12px;}
+.form-grid.g2{grid-template-columns:1fr 1fr;}
+.form-grid.g3{grid-template-columns:1fr 1fr 1fr;}
+.form-grid.g4{grid-template-columns:1fr 1fr 1fr 1fr;}
+.form-group{display:flex;flex-direction:column;gap:4px;}
+.form-group.span2{grid-column:span 2;}
+.form-group.span3{grid-column:span 3;}
+.form-group.span4{grid-column:span 4;}
+label{font-size:11px;font-weight:500;color:var(--gris2);}
+label span.req{color:var(--rojo);margin-left:2px;}
+input[type=text],input[type=number],input[type=date],input[type=email],
+select,textarea{
+  padding:7px 10px;border:1px solid var(--border);border-radius:5px;
+  font-size:12px;color:var(--gris1);background:#fff;outline:none;
+  font-family:var(--font);transition:.15s;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--az4);box-shadow:0 0 0 3px rgba(61,142,217,.12);}
+textarea{resize:vertical;min-height:60px;}
+select{cursor:pointer;}
+.form-hint{font-size:10px;color:var(--gris3);margin-top:2px;}
+.input-group{display:flex;}
+.input-group input{flex:1;border-radius:5px 0 0 5px;}
+.input-group .ig-addon{
+  padding:7px 10px;background:var(--gris5);border:1px solid var(--border);
+  border-left:none;border-radius:0 5px 5px 0;font-size:12px;color:var(--gris3);white-space:nowrap;
+}
+
+/* ═══════════ LOGIN SCREEN ═══════════ */
+.login-screen{
+  position:fixed;inset:0;background:var(--az1);
+  display:flex;align-items:center;justify-content:center;z-index:200;
+  flex-direction:column;gap:0;
+}
+.login-box{
+  background:#fff;border-radius:10px;width:360px;
+  box-shadow:0 20px 60px rgba(0,10,40,.4);overflow:hidden;
+}
+.login-head{
+  background:var(--az1);padding:28px 28px 22px;
+  border-bottom:3px solid var(--az3);text-align:center;
+}
+.login-head svg{width:40px;height:40px;margin-bottom:12px;}
+.login-head h2{color:#fff;font-size:15px;font-weight:600;}
+.login-head p{color:rgba(255,255,255,.5);font-size:11px;margin-top:4px;}
+.login-body{padding:24px 28px;}
+.login-body .form-group{margin-bottom:14px;}
+.login-body label{display:block;font-size:11px;font-weight:600;color:var(--gris2);margin-bottom:5px;}
+.login-body input{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font);outline:none;}
+.login-body input:focus{border-color:var(--az4);box-shadow:0 0 0 3px rgba(61,142,217,.12);}
+.login-btn{
+  width:100%;padding:10px;background:var(--az2);color:#fff;border:none;
+  border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);
+  margin-top:6px;transition:.15s;
+}
+.login-btn:hover{background:var(--az3);}
+.login-error{color:var(--rojo);font-size:11px;margin-top:8px;display:none;text-align:center;}
+.login-footer{text-align:center;padding:10px;font-size:10px;color:var(--gris3);background:var(--gris6);border-top:1px solid var(--border);}
+
+/* ═══════════ EMPTY STATE ═══════════ */
+.empty-state{text-align:center;padding:40px;color:var(--gris3);}
+.empty-state svg{width:36px;height:36px;margin:0 auto 10px;display:block;opacity:.3;}
+.empty-state p{font-size:13px;}
+
+/* ═══════════ TOAST ═══════════ */
+.toast{
+  position:fixed;bottom:24px;right:24px;
+  background:var(--az1);color:#fff;padding:12px 20px;border-radius:8px;
+  font-size:13px;box-shadow:0 8px 24px rgba(0,20,50,.35);
+  opacity:0;transform:translateY(10px);transition:.3s;pointer-events:none;z-index:9999;
+  display:flex;align-items:center;gap:10px;min-width:240px;
+}
+.toast.show{opacity:1;transform:translateY(0);}
+.toast.ok{border-left:4px solid var(--verde);}
+.toast.err{border-left:4px solid var(--rojo);}
+
+/* ═══════════ SUCCESS BANNER ═══════════ */
+.success-banner{
+  position:fixed;top:72px;left:50%;transform:translateX(-50%) translateY(-20px);
+  background:var(--verde);color:#fff;padding:12px 28px;border-radius:8px;
+  font-size:13px;font-weight:500;z-index:9999;opacity:0;
+  box-shadow:0 6px 20px rgba(0,100,60,.35);
+  display:flex;align-items:center;gap:10px;transition:.3s;pointer-events:none;
+  white-space:nowrap;
+}
+.success-banner.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+/* ═══════════ ENDOSOS ═══════════ */
+.endoso-card{
+  background:var(--gris6);border:1px solid var(--border);border-radius:6px;
+  padding:10px 12px;margin-bottom:8px;position:relative;
+}
+.endoso-card .endoso-tag{
+  display:inline-flex;align-items:center;gap:4px;
+  background:var(--az6);color:var(--az2);font-size:10px;padding:2px 7px;
+  border-radius:10px;font-weight:500;margin-bottom:8px;
+}
+.endoso-remove{
+  position:absolute;top:8px;right:8px;
+  background:none;border:none;color:var(--gris3);cursor:pointer;font-size:14px;line-height:1;
+  padding:2px 4px;border-radius:3px;transition:.15s;
+}
+.endoso-remove:hover{background:var(--rojo-l);color:var(--rojo);}
+
+/* ═══════════ PAGOS DINÁMICOS ═══════════ */
+.pago-card{
+  background:var(--gris6);border:1px solid var(--border);border-radius:6px;
+  padding:10px 12px;margin-bottom:8px;position:relative;
+}
+.pago-card .pago-num{
+  font-size:10px;font-weight:600;color:var(--gris3);font-family:var(--mono);
+  margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;
+}
+.pago-remove{
+  position:absolute;top:8px;right:8px;
+  background:none;border:none;color:var(--gris3);cursor:pointer;font-size:14px;line-height:1;
+  padding:2px 4px;border-radius:3px;transition:.15s;
+}
+.pago-remove:hover{background:var(--rojo-l);color:var(--rojo);}
+.add-row-btn{
+  display:flex;align-items:center;gap:6px;
+  width:100%;padding:7px 12px;border:1px dashed var(--border);border-radius:6px;
+  background:none;color:var(--az2);font-size:12px;cursor:pointer;
+  font-family:var(--font);transition:.15s;margin-top:4px;
+}
+.add-row-btn:hover{background:var(--az7);border-color:var(--az4);}
+
+/* ═══════════ TOTALIZADOR ═══════════ */
+.totalizador{
+  background:var(--az7);border:1px solid var(--az6);border-radius:6px;
+  padding:10px 14px;margin-top:10px;display:flex;gap:20px;flex-wrap:wrap;
+}
+.tot-item{font-size:11px;color:var(--gris2);}
+.tot-item strong{display:block;font-size:14px;color:var(--az1);font-family:var(--mono);font-weight:500;}
+.tot-item.warn strong{color:var(--rojo);}
+
+/* ═══════════ HISTORIAL ═══════════ */
+.hist-row{
+  display:flex;align-items:flex-start;gap:8px;padding:8px 0;
+  border-bottom:1px solid var(--gris5);font-size:11px;
+}
+.hist-row:last-child{border-bottom:none;}
+.hist-dot{width:7px;height:7px;border-radius:50%;background:var(--az4);flex-shrink:0;margin-top:3px;}
+.hist-fecha{font-family:var(--mono);color:var(--gris3);white-space:nowrap;font-size:10px;margin-top:1px;}
+
+/* ═══════════ DETAIL PANEL ═══════════ */
+.detail-overlay{
+  position:fixed;inset:0;background:rgba(0,20,50,.45);
+  z-index:90;opacity:0;pointer-events:none;transition:.2s;
+  display:flex;justify-content:flex-end;
+}
+.detail-overlay.open{opacity:1;pointer-events:all;}
+.detail-panel{
+  width:400px;background:#fff;height:100%;overflow-y:auto;
+  transform:translateX(20px);transition:.2s;box-shadow:-4px 0 20px rgba(0,20,50,.15);
+}
+.detail-overlay.open .detail-panel{transform:translateX(0);}
+.dp-header{background:var(--az1);color:#fff;padding:16px 18px;position:sticky;top:0;}
+.dp-header h3{font-size:13px;font-weight:600;line-height:1.3;}
+.dp-header p{font-size:10px;opacity:.6;margin-top:3px;}
+.dp-close{position:absolute;top:12px;right:14px;background:rgba(255,255,255,.12);border:none;color:#fff;width:26px;height:26px;border-radius:4px;cursor:pointer;font-size:14px;}
+.dp-body{padding:16px;}
+.dp-section{margin-bottom:16px;}
+.dp-section-title{font-size:10px;font-weight:600;color:var(--az2);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--az6);}
+.dp-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--gris5);}
+.dp-row:last-child{border-bottom:none;}
+.dp-row .dl{font-size:11px;color:var(--gris3);}
+.dp-row .dv{font-size:11px;font-weight:500;text-align:right;max-width:55%;}
+.avance-block{background:var(--gris6);border-radius:6px;padding:10px;margin-top:6px;}
+.avance-row{margin-bottom:8px;}
+.avance-row:last-child{margin-bottom:0;}
+.avance-label{display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;}
+.avance-label span:first-child{color:var(--gris2);}
+.avance-label span:last-child{font-weight:600;font-family:var(--mono);}
+.avance-track{height:7px;background:var(--border);border-radius:4px;overflow:hidden;}
+.avance-fill{height:100%;border-radius:4px;transition:.5s;}
+
+/* ═══════════ STATS CHART ═══════════ */
+.chart-wrap{background:#fff;border-radius:8px;border:1px solid var(--border);padding:16px;margin-bottom:20px;}
+.chart-title{font-size:13px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
+.chart-bars{display:flex;align-items:flex-end;gap:4px;height:100px;}
+.chart-bar-group{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;}
+.chart-bar{width:100%;border-radius:3px 3px 0 0;transition:.4s;cursor:pointer;}
+.chart-bar:hover{filter:brightness(.9);}
+.chart-bar-lbl{font-size:9px;color:var(--gris3);text-align:center;font-family:var(--mono);}
+.chart-legend{display:flex;gap:12px;margin-top:10px;justify-content:center;}
+.chart-legend-item{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--gris3);}
+.chart-legend-dot{width:8px;height:8px;border-radius:2px;}
+
+/* ═══════════ UNIDAD MODULE ═══════════ */
+.module-header{
+  background:var(--az1);color:#fff;border-radius:8px;
+  padding:16px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;
+}
+.module-icon{width:40px;height:40px;background:rgba(255,255,255,.12);border-radius:7px;display:flex;align-items:center;justify-content:center;}
+.module-icon svg{width:22px;height:22px;}
+.module-info h2{font-size:15px;font-weight:600;}
+.module-info p{font-size:11px;opacity:.6;margin-top:2px;}
+.module-kpis{display:flex;gap:10px;margin-left:auto;}
+.mod-kpi{text-align:center;background:rgba(255,255,255,.08);padding:6px 14px;border-radius:6px;}
+.mod-kpi-num{font-size:18px;font-weight:300;font-family:var(--mono);}
+.mod-kpi-lbl{font-size:9px;opacity:.6;margin-top:1px;}
+
+/* ═══════════ RESPONSIVE ═══════════ */
+@media(max-width:900px){
+  .sidenav{width:52px;}
+  .nav-item span,.nav-badge,.sidenav-section{display:none;}
+  .nav-item{padding:12px;justify-content:center;}
+  .nav-item .nav-icon{margin:0;}
+  .unidades-grid{grid-template-columns:1fr 1fr;}
+  .kpi-grid{grid-template-columns:repeat(3,1fr);}
+  .form-grid.g4{grid-template-columns:1fr 1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════ LOGIN ══════════════════════ -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <div class="login-head">
+      <svg viewBox="0 0 40 40" fill="none">
+        <rect width="40" height="40" rx="8" fill="rgba(255,255,255,.08)"/>
+        <path d="M8 28 L16 18 L22 24 L28 14 L34 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M6 32 H34" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <h2>Sistema de Seguimiento DGCV</h2>
+      <p>Secretaría de Infraestructura y Transporte</p>
+    </div>
+    <div class="login-body">
+      <div class="form-group">
+        <label>Unidad / Coordinación</label>
+        <select id="loginUnidad">
+          <option value="">— Seleccione su unidad —</option>
+          <option value="admin">Administración General</option>
+          <option value="rvp">Red Vial Pavimentada</option>
+          <option value="rvnp">Red Vial No Pavimentada</option>
+          <option value="rre">Respuesta Rápida a Emergencias</option>
+          <option value="macro">Macroproyectos</option>
+          <option value="ldv">Limpieza de Derecho de Vía</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Nombre de usuario</label>
+        <input type="text" id="loginUser" placeholder="usuario.coordinador"/>
+      </div>
+      <div class="form-group">
+        <label>Contraseña</label>
+        <input type="password" id="loginPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"/>
+      </div>
+      <button class="login-btn" onclick="doLogin()">Ingresar al Sistema</button>
+      <div class="login-error" id="loginError">Credenciales incorrectas. Intente nuevamente.</div>
+    </div>
+    <div class="login-footer">SIT · DGCV · Honduras 2025 — Acceso Restringido</div>
+  </div>
+</div>
+
+<!-- ══════════════════════ APP SHELL ══════════════════════ -->
+<div id="appShell" style="display:none;flex-direction:column;height:100%;">
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-escudo">
+    <svg viewBox="0 0 20 20" fill="none">
+      <path d="M4 16 L8 10 L11 13 L14 7 L17 10" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M3 18H17" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="topbar-brand">
+    <h1>Dirección General de Construcción Vial — DGCV</h1>
+    <p>Secretaría de Infraestructura y Transporte · República de Honduras</p>
+  </div>
+  <span class="topbar-fecha" id="topbarFecha"></span>
+  <div id="syncStatus" style="display:none;align-items:center;gap:6px;font-size:11px;padding:5px 10px;border-radius:20px;background:rgba(255,255,255,.08);">
+    <span id="syncDot" style="width:7px;height:7px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span>
+    <span id="syncLabel">Sin sincronizar</span>
+  </div>
+  <button id="syncBtn" onclick="recargarDesdeSupabase()" style="display:none;align-items:center;gap:6px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.2);color:#fff;padding:5px 12px;border-radius:20px;font-size:11px;cursor:pointer;font-family:var(--font);transition:.2s;">
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 6A4 4 0 116 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/><path d="M6 2l2-2M6 2L4 0" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Recargar datos
+  </button>
+  <div class="topbar-user" onclick="doLogout()">
+    <div class="avatar" id="userAvatar">--</div>
+    <span id="userName" style="font-size:12px;"></span>
+    <span style="opacity:.4;font-size:10px;">✕ Salir</span>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="app">
+
+<!-- SIDENAV -->
+<nav class="sidenav">
+  <div class="sidenav-section">Principal</div>
+  <div class="nav-item active" onclick="showView('dashboard',this)" id="nav-dashboard">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+    <span>Dashboard General</span>
+  </div>
+
+  <div class="sidenav-section">Unidades</div>
+  <div class="nav-item" onclick="showView('rvp',this)" id="nav-rvp">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M1 12L4 8L7 10L10 5L13 7L15 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M1 14H15" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    <span>Red Vial Pavimentada</span>
+    <span class="nav-badge" id="badge-rvp">0</span>
+  </div>
+  <div class="nav-item" onclick="showView('rvnp',this)" id="nav-rvnp">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M1 13 C3 11 5 13 7 11 S11 11 13 9 S15 7 15 7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/><path d="M1 14H15" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    <span>Red Vial No Pavimentada</span>
+    <span class="nav-badge" id="badge-rvnp">0</span>
+  </div>
+  <div class="nav-item" onclick="showView('rre',this)" id="nav-rre">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 1L9.5 6H15L10.5 9L12 14L8 11L4 14L5.5 9L1 6H6.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+    <span>Respuesta Rápida</span>
+    <span class="nav-badge warn" id="badge-rre">0</span>
+  </div>
+  <div class="nav-item" onclick="showView('macro',this)" id="nav-macro">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="4" width="14" height="9" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1" stroke="currentColor" stroke-width="1.2"/><path d="M1 8h14" stroke="currentColor" stroke-width="1.2"/></svg>
+    <span>Macroproyectos</span>
+    <span class="nav-badge" id="badge-macro">0</span>
+  </div>
+  <div class="nav-item" onclick="showView('ldv',this)" id="nav-ldv">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M3 13L6 7L8 10L10 6L13 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 14H15" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    <span>Limpieza Derecho de Vía</span>
+    <span class="nav-badge" id="badge-ldv">0</span>
+  </div>
+
+  <div class="sidenav-bottom">
+    <div class="logout-btn" onclick="doLogout()">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 7H13M10 4l3 3-3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M7 2H2a1 1 0 00-1 1v8a1 1 0 001 1h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <span>Cerrar sesión</span>
+    </div>
+  </div>
+</nav>
+
+<!-- CONTENT AREA -->
+<div class="content" id="mainContent"></div>
+
+</div><!-- .app -->
+</div><!-- #appShell -->
+
+<!-- ══════════════════════ DETAIL PANEL ══════════════════════ -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetail(event)">
+  <div class="detail-panel" id="detailPanel">
+    <div class="dp-header">
+      <h3 id="dpTitle">—</h3>
+      <p id="dpSub">—</p>
+      <button class="dp-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="dp-body" id="dpBody"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL FORM ══════════════════════ -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v14M1 8h14" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <h3 id="modalTitle">Nuevo Proyecto</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveProject()">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 7l3 3 6-6" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Guardar Proyecto
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SYNC PANEL ══════════════════════ -->
+<div class="modal-overlay" id="syncOverlay" onclick="closeSyncPanel(event)">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header" style="background:#0F5132;">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13 8A5 5 0 118 3" stroke="white" stroke-width="1.5" stroke-linecap="round"/><path d="M8 3l2.5-2.5M8 3L5.5.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <h3>Sincronización con Google Sheets</h3>
+      <button class="modal-close" onclick="closeSyncPanel()">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- STEP 1: URL config -->
+      <div id="sync-step-config">
+        <div style="background:#E8F5E9;border:1px solid #A5D6A7;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:#1B5E20;line-height:1.6;">
+          <strong>¿Cómo funciona?</strong><br>
+          Cada vez que guarda un proyecto, el sistema puede enviarlo automáticamente a Google Sheets. Una hoja por unidad, con todas las columnas de su base de datos. Pegue aquí la URL de su Google Apps Script Web App.
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>URL del Apps Script Web App <span class="req">*</span></label>
+          <input type="text" id="sheetsUrl" placeholder="https://script.google.com/macros/s/XXXXXXX/exec" style="width:100%;font-size:11px;font-family:var(--mono);" value=""/>
+          <div class="form-hint">Obtenga esta URL siguiendo las instrucciones del archivo <strong>SIT_AppsScript.gs</strong> adjunto.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div class="form-group" style="flex:1;min-width:160px;margin:0;">
+            <label>Sincronización automática</label>
+            <select id="syncAuto" style="width:100%">
+              <option value="manual">Manual (botón "Sincronizar")</option>
+              <option value="auto">Automática al guardar proyecto</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveAndTestSync()" style="margin-top:12px;width:100%;">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6.5l3 3 5-5" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Guardar y probar conexión
+        </button>
+        <div id="sync-test-result" style="margin-top:10px;display:none;font-size:11px;padding:8px 12px;border-radius:5px;"></div>
+      </div>
+
+      <!-- STEP 2: Sync actions -->
+      <div id="sync-step-actions" style="display:none;">
+        <div style="background:#E8F5E9;border:1px solid #A5D6A7;border-radius:6px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+          <span style="color:#0F5132;font-size:16px;">✓</span>
+          <div style="font-size:12px;color:#1B5E20;"><strong>Conexión activa</strong> — <span id="sync-url-display" style="font-family:var(--mono);font-size:10px;word-break:break-all;"></span></div>
+        </div>
+
+        <div style="font-size:12px;font-weight:600;color:var(--gris2);margin-bottom:10px;">Seleccione qué enviar a Google Sheets:</div>
+        <div id="sync-unidad-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;"></div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="runSync('all')" style="flex:1;">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 6A5 5 0 1011 6" stroke="white" stroke-width="1.5" stroke-linecap="round"/><path d="M11 6l-2-2M11 6l-2 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Sincronizar Todo
+          </button>
+          <button class="btn btn-outline" onclick="openSyncConfig()">Cambiar URL</button>
+        </div>
+
+        <div id="sync-progress" style="display:none;margin-top:12px;">
+          <div style="font-size:11px;color:var(--gris3);margin-bottom:6px;" id="sync-progress-lbl">Enviando datos…</div>
+          <div style="height:4px;background:var(--gris5);border-radius:2px;overflow:hidden;">
+            <div id="sync-progress-bar" style="height:100%;background:var(--verde);border-radius:2px;transition:width .3s;width:0%"></div>
+          </div>
+        </div>
+        <div id="sync-log" style="margin-top:10px;max-height:140px;overflow-y:auto;font-size:10px;font-family:var(--mono);color:var(--gris3);background:var(--gris6);border-radius:5px;padding:8px;display:none;"></div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeSyncPanel()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+<!-- SUCCESS BANNER -->
+<div class="success-banner" id="successBanner"></div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════
+//  SUPABASE — API REST directa (sin librería externa)
+// ═══════════════════════════════════════════════════════════
+var SUPA_URL = 'https://yvsulnkwirccdpnzmesm.supabase.co/rest/v1';
+var SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c3Vsbmt3aXJjY2RwbnptZXNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5Mzk0MzgsImV4cCI6MjA4OTUxNTQzOH0.Z1DitGY405QHmrFhQxN1VJI2us8aLU9gfwhiuUO2qy4';
+
+function supaHeaders(extra) {
+  var h = {
+    'apikey': SUPA_KEY,
+    'Authorization': 'Bearer ' + SUPA_KEY,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+  };
+  if (extra) Object.assign(h, extra);
+  return h;
+}
+
+function supaGet(table, query) {
+  return fetch(SUPA_URL + '/' + table + '?' + (query || ''), {
+    method: 'GET',
+    headers: supaHeaders()
+  }).then(function(r) {
+    return r.json().then(function(d) {
+      if (!r.ok) throw new Error(JSON.stringify(d));
+      return d;
+    });
+  });
+}
+
+function supaPost(table, body) {
+  return fetch(SUPA_URL + '/' + table, {
+    method: 'POST',
+    headers: supaHeaders(),
+    body: JSON.stringify(body)
+  }).then(function(r) {
+    return r.json().then(function(d) {
+      if (!r.ok) throw new Error(JSON.stringify(d));
+      return d;
+    });
+  });
+}
+
+function supaPatch(table, id, body) {
+  return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
+    method: 'PATCH',
+    headers: supaHeaders(),
+    body: JSON.stringify(body)
+  }).then(function(r) {
+    return r.json().then(function(d) {
+      if (!r.ok) throw new Error(JSON.stringify(d));
+      return d;
+    });
+  });
+}
+
+function supaDelete(table, id) {
+  return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
+    method: 'DELETE',
+    headers: supaHeaders({ 'Prefer': 'return=minimal' })
+  }).then(function(r) {
+    if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CONSTANTES DEL SISTEMA
+// ═══════════════════════════════════════════════════════════
+var USERS = {
+  admin: { pass:'admin2025', nombre:'Administrador',           rol:'Administración General' },
+  rvp:   { pass:'rvp2025',   nombre:'Coord. Pavimentada',      rol:'Red Vial Pavimentada' },
+  rvnp:  { pass:'rvnp2025',  nombre:'Coord. No Pavimentada',   rol:'Red Vial No Pavimentada' },
+  rre:   { pass:'rre2025',   nombre:'Coord. Emergencias',      rol:'Respuesta Rápida a Emergencias' },
+  macro: { pass:'macro2025', nombre:'Coord. Macroproyectos',   rol:'Macroproyectos' },
+  ldv:   { pass:'ldv2025',   nombre:'Coord. Limpieza DV',      rol:'Limpieza de Derecho de Vía' }
+};
+
+var UNIDADES = {
+  rvp:   { nombre:'Red Vial Pavimentada',            color:'#1268C4', bg:'#D6EBF9' },
+  rvnp:  { nombre:'Red Vial No Pavimentada',         color:'#0D7A4E', bg:'#E3F5EE' },
+  rre:   { nombre:'Respuesta Rápida a Emergencias',  color:'#C0392B', bg:'#FBEAEA' },
+  macro: { nombre:'Macroproyectos',                  color:'#5C2E8A', bg:'#EDE5F5' },
+  ldv:   { nombre:'Limpieza de Derecho de Vía',      color:'#B8620A', bg:'#FDF3E3' }
+};
+
+var ESTADOS = ['En Ejecución','En Proceso / Contratación','Suspendido','Terminado'];
+var DEPTOS  = ['Atlántida','Choluteca','Colón','Comayagua','Copán','Cortés','El Paraíso',
+               'Francisco Morazán','Gracias a Dios','Intibucá','Islas de la Bahía','La Paz',
+               'Lempira','Ocotepeque','Olancho','Santa Bárbara','Valle','Yoro'];
+
+// ═══════════════════════════════════════════════════════════
+//  ESTADO DE LA APLICACIÓN
+// ═══════════════════════════════════════════════════════════
+var DB          = { rvp:[], rvnp:[], rre:[], macro:[], ldv:[] };
+var currentUser = null;
+var currentView = 'dashboard';
+var editingId   = null;
+var endosoCount = 0;
+var pagoCount   = 0;
+var dbOnline    = false;
+
+// ═══════════════════════════════════════════════════════════
+//  UTILIDADES
+// ═══════════════════════════════════════════════════════════
+function fmtL(n) {
+  var v = parseFloat(n);
+  if (isNaN(v)) return '—';
+  return v.toLocaleString('es-HN', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+
+function calcAvFin(p) {
+  var mI = parseFloat(p.montoContratoInicial) || 0;
+  var mM = parseFloat(p.montoModificacion) || 0;
+  var vig = mM > 0 ? mM : mI;
+  if (!vig) return 0;
+  var dev = parseFloat(p.totalDevengado) || 0;
+  return Math.min(parseFloat((dev / vig * 100).toFixed(2)), 100);
+}
+
+function fmtFecha(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString('es-HN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  catch(e) { return iso; }
+}
+
+function saveLocalDB() {
+  try { localStorage.setItem('sit_db', JSON.stringify(DB)); } catch(e) {}
+}
+
+function setDbStatus(online) {
+  dbOnline = online;
+  var dot = document.getElementById('syncDot');
+  var lbl = document.getElementById('syncLabel');
+  if (dot) dot.style.background = online ? '#4CAF50' : '#FFA726';
+  if (lbl) lbl.textContent = online ? 'Base de datos conectada ✓' : 'Sin conexión — datos locales';
+}
+
+function showToast(msg, type) {
+  var t = document.getElementById('toast');
+  if (!t) return;
+  t.innerHTML = '<span>' + msg + '</span>';
+  t.className = 'toast ' + (type || 'ok') + ' show';
+  clearTimeout(t._t);
+  t._t = setTimeout(function() { t.classList.remove('show'); }, 4000);
+}
+
+function showBanner(msg) {
+  var b = document.getElementById('successBanner');
+  if (!b) return;
+  b.textContent = msg;
+  b.classList.add('show');
+  clearTimeout(b._t);
+  b._t = setTimeout(function() { b.classList.remove('show'); }, 3500);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SUPABASE — OPERACIONES
+// ═══════════════════════════════════════════════════════════
+function cargarProyectos() {
+  return supaGet('proyectos', 'select=*&order=created_at.desc')
+    .then(function(rows) {
+      DB = { rvp:[], rvnp:[], rre:[], macro:[], ldv:[] };
+      (rows || []).forEach(function(row) {
+        var proj = Object.assign({}, row.data || {}, { _sid: row.id, _unidad: row.unidad });
+        if (DB[row.unidad]) DB[row.unidad].push(proj);
+      });
+      setDbStatus(true);
+      saveLocalDB();
+    })
+    .catch(function(e) {
+      console.warn('Supabase error:', e.message);
+      try { DB = JSON.parse(localStorage.getItem('sit_db') || '{"rvp":[],"rvnp":[],"rre":[],"macro":[],"ldv":[]}'); }
+      catch(ex) { DB = { rvp:[], rvnp:[], rre:[], macro:[], ldv:[] }; }
+      setDbStatus(false);
+    });
+}
+
+function persistirProyecto(unidad, proj) {
+  var mI  = parseFloat(proj.montoContratoInicial) || 0;
+  var mM  = parseFloat(proj.montoModificacion) || 0;
+  var vig = mM > 0 ? mM : mI;
+  var row = {
+    unidad:            unidad,
+    proyecto:          proj.proyecto || '',
+    departamento:      proj.departamento || null,
+    estado:            proj.estado || null,
+    avance_fisico:     parseFloat(proj.avanceFisico) || 0,
+    avance_financiero: parseFloat(proj.avanceFinanciero) || 0,
+    total_devengado:   parseFloat(proj.totalDevengado) || 0,
+    monto_vigente:     vig,
+    data:              proj
+  };
+  if (proj._sid) {
+    return supaPatch('proyectos', proj._sid, row).then(function() { return proj._sid; });
+  } else {
+    return supaPost('proyectos', row).then(function(res) {
+      return Array.isArray(res) ? res[0].id : res.id;
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  AUTH
+// ═══════════════════════════════════════════════════════════
+function doLogin() {
+  var unidad = document.getElementById('loginUnidad').value;
+  var user   = document.getElementById('loginUser').value.trim();
+  var pass   = document.getElementById('loginPass').value;
+  var err    = document.getElementById('loginError');
+  var btn    = document.querySelector('.login-btn');
+
+  err.style.display = 'none';
+
+  if (!unidad || !user || !pass) {
+    err.style.display = 'block';
+    err.textContent = 'Complete todos los campos.';
+    return;
+  }
+  var u = USERS[unidad];
+  if (!u || pass !== u.pass) {
+    err.style.display = 'block';
+    err.textContent = 'Credenciales incorrectas.';
+    return;
+  }
+
+  btn.textContent = 'Cargando...';
+  btn.disabled = true;
+
+  cargarProyectos().then(function() {
+    currentUser = { unidad: unidad, nombre: u.nombre, rol: u.rol };
+
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('appShell').style.display    = 'flex';
+    document.getElementById('userName').textContent      = u.nombre;
+    document.getElementById('userAvatar').textContent    = u.nombre.split(' ').map(function(w){ return w[0]; }).join('').slice(0,2).toUpperCase();
+    document.getElementById('topbarFecha').textContent   = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'short',year:'numeric'});
+
+    var syncStatus = document.getElementById('syncStatus');
+    var syncBtn    = document.getElementById('syncBtn');
+    if (syncStatus) syncStatus.style.display = 'flex';
+    if (syncBtn)    syncBtn.style.display    = 'flex';
+
+    if (unidad !== 'admin') {
+      document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
+        var v = el.id.replace('nav-', '');
+        if (v !== 'dashboard' && v !== unidad) el.style.display = 'none';
+      });
+    }
+
+    updateBadges();
+    showView('dashboard', document.getElementById('nav-dashboard'));
+
+    btn.textContent = 'Ingresar al Sistema';
+    btn.disabled = false;
+
+    showToast(dbOnline ? 'Conectado. Datos cargados desde Supabase.' : 'Sesión iniciada (sin conexión a BD).', dbOnline ? 'ok' : 'err');
+  });
+}
+
+function doLogout() {
+  currentUser = null;
+  DB = { rvp:[], rvnp:[], rre:[], macro:[], ldv:[] };
+  document.getElementById('appShell').style.display  = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginError').style.display = 'none';
+  document.querySelectorAll('.nav-item').forEach(function(el) { el.style.display = ''; });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NAVEGACIÓN
+// ═══════════════════════════════════════════════════════════
+function showView(view, el) {
+  currentView = view;
+  document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+  if (el) el.classList.add('active');
+  if (view === 'dashboard') renderDashboard();
+  else renderUnidad(view);
+}
+
+function updateBadges() {
+  Object.keys(UNIDADES).forEach(function(k) {
+    var b = document.getElementById('badge-' + k);
+    if (b) b.textContent = (DB[k] || []).length;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DASHBOARD
+// ═══════════════════════════════════════════════════════════
+function renderDashboard() {
+  var allP  = Object.values(DB).flat();
+  var total = allP.length;
+  var ejec  = allP.filter(function(p){ return p.estado === 'En Ejecución'; }).length;
+  var susp  = allP.filter(function(p){ return p.estado === 'Suspendido'; }).length;
+  var avgF  = total ? Math.round(allP.reduce(function(a,p){ return a + (parseFloat(p.avanceFisico)||0); }, 0) / total) : 0;
+  var avgFin= total ? Math.round(allP.reduce(function(a,p){ return a + calcAvFin(p); }, 0) / total) : 0;
+
+  var chartBars = Object.entries(UNIDADES).map(function(entry) {
+    var k = entry[0]; var u = entry[1];
+    var pl = DB[k] || [];
+    var af   = pl.length ? Math.round(pl.reduce(function(a,p){ return a+(parseFloat(p.avanceFisico)||0); },0)/pl.length) : 0;
+    var afin = pl.length ? Math.round(pl.reduce(function(a,p){ return a+calcAvFin(p); },0)/pl.length) : 0;
+    return '<div class="chart-bar-group">' +
+      '<div style="display:flex;gap:2px;align-items:flex-end;height:90px;">' +
+        '<div class="chart-bar" style="flex:1;height:'+Math.max(af,2)+'%;background:var(--az3);" title="Físico: '+af+'%"></div>' +
+        '<div class="chart-bar" style="flex:1;height:'+Math.max(afin,2)+'%;background:var(--verde);" title="Financiero: '+afin+'%"></div>' +
+      '</div>' +
+      '<div class="chart-bar-lbl" style="font-size:8px">' + u.nombre.split(' ').slice(0,2).join(' ') + '</div>' +
+    '</div>';
+  }).join('');
+
+  var ucards = Object.entries(UNIDADES).map(function(entry) {
+    var k = entry[0]; var u = entry[1];
+    var pl = DB[k] || [];
+    var af   = pl.length ? Math.round(pl.reduce(function(a,p){ return a+(parseFloat(p.avanceFisico)||0); },0)/pl.length) : 0;
+    var afin = pl.length ? Math.round(pl.reduce(function(a,p){ return a+calcAvFin(p); },0)/pl.length) : 0;
+    var eN = pl.filter(function(p){ return p.estado==='En Ejecución'; }).length;
+    var sN = pl.filter(function(p){ return p.estado==='Suspendido'; }).length;
+    var canNav = currentUser && (currentUser.unidad==='admin' || currentUser.unidad===k);
+    return '<div class="unidad-card" onclick="' + (canNav ? 'showView(\''+k+'\',document.getElementById(\'nav-'+k+'\'))' : '') + '">' +
+      '<div class="uc-header">' +
+        '<div class="uc-icon" style="background:'+u.bg+'"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" style="color:'+u.color+'"><path d="M2 14L6 8L9 11L12 5L16 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M1 16H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>' +
+        '<div><div class="uc-title">'+u.nombre+'</div><div class="uc-sub">'+pl.length+' proyecto'+(pl.length!==1?'s':'')+'</div></div>' +
+        '<div class="uc-arrow" style="color:'+u.color+'">→</div>' +
+      '</div>' +
+      '<div class="uc-stats">' +
+        '<div class="uc-stat"><div class="uc-stat-num" style="color:'+u.color+'">'+eN+'</div><div class="uc-stat-lbl">En Ejecución</div></div>' +
+        '<div class="uc-stat"><div class="uc-stat-num" style="color:'+(sN>0?'var(--amarillo)':u.color)+'">'+sN+'</div><div class="uc-stat-lbl">Suspendidos</div></div>' +
+      '</div>' +
+      '<div class="uc-bar-row"><span class="uc-bar-lbl">Físico</span><div class="uc-bar-track"><div class="uc-bar-fill" style="width:'+af+'%;background:'+u.color+'"></div></div><span class="uc-bar-pct">'+af+'%</span></div>' +
+      '<div class="uc-bar-row"><span class="uc-bar-lbl">Financiero</span><div class="uc-bar-track"><div class="uc-bar-fill" style="width:'+afin+'%;background:var(--verde)"></div></div><span class="uc-bar-pct">'+afin+'%</span></div>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('mainContent').innerHTML =
+    '<div class="page-header"><h2>Dashboard General — Red Vial Nacional</h2><p>Resumen ejecutivo de todas las unidades · Año 2025</p></div>' +
+    '<div class="kpi-grid">' +
+      '<div class="kpi-card az"><div class="kpi-num">'+total+'</div><div class="kpi-lbl">Total de Proyectos</div></div>' +
+      '<div class="kpi-card verde"><div class="kpi-num">'+ejec+'</div><div class="kpi-lbl">En Ejecución</div></div>' +
+      '<div class="kpi-card amarillo"><div class="kpi-num">'+avgF+'%</div><div class="kpi-lbl">Avance Físico Prom.</div></div>' +
+      '<div class="kpi-card az"><div class="kpi-num">'+avgFin+'%</div><div class="kpi-lbl">Avance Financiero Prom.</div></div>' +
+      '<div class="kpi-card '+(susp>0?'rojo':'gris')+'"><div class="kpi-num">'+susp+'</div><div class="kpi-lbl">Suspendidos</div></div>' +
+    '</div>' +
+    '<div class="chart-wrap"><div class="chart-title"><span>Avance por Unidad</span><div class="chart-legend"><div class="chart-legend-item"><div class="chart-legend-dot" style="background:var(--az3)"></div>Físico</div><div class="chart-legend-item"><div class="chart-legend-dot" style="background:var(--verde)"></div>Financiero</div></div></div><div class="chart-bars">'+chartBars+'</div></div>' +
+    '<div style="font-size:12px;font-weight:600;color:var(--gris2);margin-bottom:10px;">Módulos por Unidad</div>' +
+    '<div class="unidades-grid">'+ucards+'</div>';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MÓDULO DE UNIDAD — TABLA DE PROYECTOS
+// ═══════════════════════════════════════════════════════════
+function renderUnidad(u) {
+  var unidad  = UNIDADES[u];
+  var plist   = DB[u] || [];
+  var canEdit = currentUser && (currentUser.unidad==='admin' || currentUser.unidad===u);
+  var af   = plist.length ? Math.round(plist.reduce(function(a,p){ return a+(parseFloat(p.avanceFisico)||0); },0)/plist.length) : 0;
+  var afin = plist.length ? Math.round(plist.reduce(function(a,p){ return a+calcAvFin(p); },0)/plist.length) : 0;
+
+  var SC = { 'En Ejecución':'ejec','En Proceso / Contratación':'proc','Suspendido':'susp','Terminado':'term' };
+
+  var rows = plist.length ? plist.map(function(p, i) {
+    var sc   = SC[p.estado] || 'proc';
+    var paf  = parseFloat(p.avanceFisico) || 0;
+    var pafin= calcAvFin(p);
+    var cPor = p.historial && p.historial.length ? p.historial[0].usuario : '—';
+    var uMod = p.historial && p.historial.length > 1 ? p.historial[p.historial.length-1] : null;
+    return '<tr>' +
+      '<td style="font-family:var(--mono);color:var(--gris3);font-size:10px">'+(String(i+1).padStart(2,'0'))+'</td>' +
+      '<td style="max-width:200px"><div style="font-weight:500;font-size:12px;line-height:1.3">'+p.proyecto+'</div><div style="font-size:10px;color:var(--gris3);margin-top:2px">'+(p.departamento||'')+(p.municipio?' · '+p.municipio:'')+'</div></td>' +
+      '<td style="font-size:11px;color:var(--gris2)">'+(p.constructora||'—')+'</td>' +
+      '<td><div style="font-size:11px;font-weight:500;color:var(--az2)">'+cPor+'</div>'+(uMod&&uMod.usuario!==cPor?'<div style="font-size:9px;color:var(--gris3)">Mod: '+uMod.usuario+'</div>':'')+'</td>' +
+      '<td><div class="mini-bar"><div class="mini-bar-fill az-fill" style="width:'+Math.min(paf,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(paf.toFixed(1))+'%</div></td>' +
+      '<td><div class="mini-bar"><div class="mini-bar-fill gr-fill" style="width:'+Math.min(pafin,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(pafin.toFixed(1))+'%</div></td>' +
+      '<td style="font-size:11px;font-family:var(--mono);color:var(--gris2)">'+(p.fechaFinObra||'—')+'</td>' +
+      '<td><span class="pill '+sc+'">'+(p.estado||'—')+'</span></td>' +
+      '<td><div class="tbl-actions">' +
+        '<button class="tbl-btn" onclick="openDetail(\''+u+'\','+i+')">Ver</button>' +
+        (canEdit ? '<button class="tbl-btn edit" onclick="openForm(\''+u+'\','+i+')">Editar</button><button class="tbl-btn" style="color:var(--rojo)" onclick="deleteProject(\''+u+'\','+i+')">✕</button>' : '') +
+      '</div></td>' +
+    '</tr>';
+  }).join('') :
+    '<tr><td colspan="9"><div class="empty-state"><svg viewBox="0 0 36 36" fill="none" style="width:32px;margin:0 auto 8px;display:block;opacity:.3"><rect x="4" y="8" width="28" height="22" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M12 8V6a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.5"/><path d="M12 18h12M12 23h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><p>No hay proyectos registrados.'+(canEdit?' Haga clic en "Nuevo Proyecto" para comenzar.':'')+'</p></div></td></tr>';
+
+  document.getElementById('mainContent').innerHTML =
+    '<div class="module-header" style="background:'+unidad.color+'">' +
+      '<div class="module-icon"><svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M2 18L7 10L11 14L15 6L20 11" stroke="white" stroke-width="1.8" stroke-linecap="round"/><path d="M1 20H21" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg></div>' +
+      '<div class="module-info"><h2>'+unidad.nombre+'</h2><p>'+plist.length+' proyecto'+(plist.length!==1?'s':'')+' registrado'+(plist.length!==1?'s':'')+'</p></div>' +
+      '<div class="module-kpis"><div class="mod-kpi"><div class="mod-kpi-num">'+af+'%</div><div class="mod-kpi-lbl">Físico</div></div><div class="mod-kpi"><div class="mod-kpi-num">'+afin+'%</div><div class="mod-kpi-lbl">Financiero</div></div><div class="mod-kpi"><div class="mod-kpi-num">'+plist.filter(function(p){return p.estado==='En Ejecución';}).length+'</div><div class="mod-kpi-lbl">En Ejecución</div></div></div>' +
+    '</div>' +
+    '<div class="table-wrap">' +
+      '<div class="table-toolbar">' +
+        '<h3>Proyectos Registrados</h3>' +
+        '<div class="search-box"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="var(--gris3)" stroke-width="1.2"/><path d="M8 8l2.5 2.5" stroke="var(--gris3)" stroke-width="1.2" stroke-linecap="round"/></svg><input type="text" placeholder="Buscar..." oninput="filterTable(this.value,\''+u+'\')" /></div>' +
+        '<select class="filter-select" onchange="filterEstado(this.value,\''+u+'\')">' +
+          '<option value="">Todos los estados</option>' +
+          ESTADOS.map(function(e){ return '<option>'+e+'</option>'; }).join('') +
+        '</select>' +
+        (canEdit ? '<button class="btn btn-primary" onclick="openForm(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
+      '</div>' +
+      '<div style="overflow-x:auto"><table class="tbl" id="tbl-'+u+'">' +
+        '<thead><tr><th>N°</th><th>Proyecto</th><th>Constructora</th><th>Registrado por</th><th>Av. Físico</th><th>Av. Financiero</th><th>Fecha Fin</th><th>Estado</th><th>Acciones</th></tr></thead>' +
+        '<tbody id="tbody-'+u+'">'+rows+'</tbody>' +
+      '</table></div>' +
+    '</div>';
+}
+
+function filterTable(q, u) {
+  document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r) {
+    r.style.display = r.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+  });
+}
+function filterEstado(e, u) {
+  document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r) {
+    r.style.display = (!e || r.textContent.includes(e)) ? '' : 'none';
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PANEL DE DETALLE
+// ═══════════════════════════════════════════════════════════
+function openDetail(u, i) {
+  var p = DB[u][i];
+  if (!p) return;
+  document.getElementById('dpTitle').textContent = p.proyecto || 'Sin nombre';
+  document.getElementById('dpSub').textContent   = UNIDADES[u].nombre + ' · ' + (p.departamento||'') + (p.municipio?' · '+p.municipio:'');
+
+  var SC = { 'En Ejecución':'ejec','En Proceso / Contratación':'proc','Suspendido':'susp','Terminado':'term' };
+  var sc  = SC[p.estado] || 'proc';
+  var af  = parseFloat(p.avanceFisico) || 0;
+  var afin= calcAvFin(p);
+  var cPor= p.historial && p.historial.length ? p.historial[0] : null;
+  var uMod= p.historial && p.historial.length > 1 ? p.historial[p.historial.length-1] : null;
+
+  var pagosHtml = (p.pagos||[]).length ? (p.pagos||[]).map(function(pg,idx) {
+    return '<div style="background:var(--gris6);border-radius:5px;padding:8px 10px;margin-bottom:5px;">' +
+      '<div style="display:flex;justify-content:space-between"><span style="font-size:11px;font-weight:500">Pago N° '+(idx+1)+'</span><span style="font-size:13px;font-weight:500;color:var(--verde);font-family:var(--mono)">L '+fmtL(pg.monto)+'</span></div>' +
+      '<div style="font-size:10px;color:var(--gris3);margin-top:4px;display:flex;flex-wrap:wrap;gap:8px">' +
+        (pg.fechaIngreso ? '<span>Ingreso: '+pg.fechaIngreso+'</span>' : '') +
+        ((pg.periodoIni||pg.periodoFin) ? '<span>Período: '+(pg.periodoIni||'?')+' → '+(pg.periodoFin||'?')+'</span>' : '') +
+        (pg.contexto ? '<span>'+pg.contexto+'</span>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('') : '<div style="font-size:11px;color:var(--gris3)">Sin pagos registrados</div>';
+
+  var histHtml = (p.historial||[]).length ? [...(p.historial||[])].reverse().map(function(h, idx) {
+    var cambios = Array.isArray(h.cambios) ? h.cambios : [h.cambios||''];
+    var color   = h.accion==='Creación' ? 'var(--verde)' : 'var(--az3)';
+    return '<div class="hist-row" style="cursor:pointer" onclick="toggleHistDetail(\'hd'+idx+'\')">' +
+      '<div class="hist-dot" style="background:'+color+'"></div>' +
+      '<div style="flex:1"><span style="font-size:11px;font-weight:500;color:'+color+'">'+(h.accion||'Cambio')+'</span> <span style="font-size:11px">'+h.usuario+'</span>' +
+        '<div id="hd'+idx+'" style="display:none;margin-top:4px;background:var(--gris6);border-radius:4px;padding:6px 8px">'+
+          cambios.map(function(c){ return '<div style="font-size:10px;color:var(--gris2);padding:2px 0;border-bottom:1px solid var(--border)">'+c+'</div>'; }).join('') +
+        '</div>' +
+      '</div>' +
+      '<div class="hist-fecha">'+fmtFecha(h.fecha)+'</div>' +
+    '</div>';
+  }).join('') : '<div style="font-size:11px;color:var(--gris3)">Sin historial</div>';
+
+  document.getElementById('dpBody').innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">' +
+      '<span class="pill '+sc+'">'+(p.estado||'—')+'</span>' +
+      (cPor ? '<span style="font-size:10px;color:var(--gris3)">Creado por <strong style="color:var(--az2)">'+cPor.usuario+'</strong></span>' : '') +
+    '</div>' +
+    (uMod ? '<div style="background:var(--amarillo-l);border-radius:5px;padding:6px 10px;margin-bottom:10px;font-size:10px;color:var(--amarillo)">Última modificación por <strong>'+uMod.usuario+'</strong> · '+fmtFecha(uMod.fecha)+'</div>' : '') +
+    '<div class="dp-section"><div class="dp-section-title">Identificación</div>' +
+      dpRow('N° Proceso', p.nProceso) + dpRow('Descripción', p.descripcion) + dpRow('Longitud', p.longitud ? p.longitud+' km' : null) +
+      dpRow('Beneficiarios', p.beneficiarios) + dpRow('Empleados Directos', p.empleadosDirectos) + dpRow('Empleados Indirectos', p.empleadosIndirectos) +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Ubicación</div>' +
+      dpRow('Departamento', p.departamento) + dpRow('Municipio', p.municipio) + dpRow('Aldea / Barrio', p.aldeaBarrio) +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Empresa Constructora</div>' +
+      dpRow('Empresa', p.constructora) + dpRow('N° Contrato', p.noContrato) + dpRow('Coordinador', p.coordinador) + dpRow('Supervisor de Campo', p.supervisor) +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Supervisión</div>' +
+      '<div class="dp-row"><span class="dl">Tipo</span><span class="dv"><span style="background:'+(p.tipoSupervision==='interna'?'var(--verde-l)':'var(--az6)')+';color:'+(p.tipoSupervision==='interna'?'var(--verde)':'var(--az2)')+';padding:2px 8px;border-radius:8px;font-size:10px">'+(p.tipoSupervision==='interna'?'Supervisión Interna DGCV':'Supervisión Externa')+'</span></span></div>' +
+      (p.tipoSupervision!=='interna' ? dpRow('Empresa Supervisora',p.supervisora)+dpRow('N° Contrato',p.noContratoSup) : '') +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Fechas y Plazo</div>' +
+      dpRow('Fecha Adjudicación', p.fechaAdjudicacion) + dpRow('Fecha de Contrato', p.fechaContrato) +
+      dpRow('Plazo', p.plazo ? p.plazo+' días' : null) + dpRow('Fecha de Inicio', p.fechaInicio) + dpRow('Fecha de Finalización', p.fechaFinObra) +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Garantías</div>' +
+      (p.nFianzaAnticipo ? '<div style="background:var(--az7);border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--az2);font-size:10px;margin-bottom:2px">ANTICIPO</div>'+dpRow('N°',p.nFianzaAnticipo)+dpRow('Vigencia',p.iniFA+' → '+p.finFA)+dpRow('Monto','L '+fmtL(p.montoFianzaAnticipo))+'</div>' : '') +
+      (p.nFianzaCumplimiento ? '<div style="background:var(--verde-l);border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--verde);font-size:10px;margin-bottom:2px">CUMPLIMIENTO</div>'+dpRow('N°',p.nFianzaCumplimiento)+dpRow('Vigencia',p.iniFC+' → '+p.finFC)+dpRow('Monto','L '+fmtL(p.montoFianzaCumplimiento))+'</div>' : '') +
+      (p.nFianzaCalidad ? '<div style="background:#FDF3E3;border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--amarillo);font-size:10px;margin-bottom:2px">CALIDAD</div>'+dpRow('N°',p.nFianzaCalidad)+dpRow('Vigencia',p.iniFCal+' → '+p.finFCal)+dpRow('Monto','L '+fmtL(p.montoFianzaCalidad))+'</div>' : '') +
+      (!p.nFianzaAnticipo&&!p.nFianzaCumplimiento&&!p.nFianzaCalidad ? '<div style="font-size:11px;color:var(--gris3)">Sin garantías registradas</div>' : '') +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Información Financiera</div>' +
+      dpRow('Monto de Contrato', 'L '+fmtL(p.montoContratoInicial)) +
+      (p.montoModificacion ? dpRow('Modificación / Adenda','<span style="color:var(--amarillo)">L '+fmtL(p.montoModificacion)+'</span>') : '') +
+      dpRow('Total Devengado', 'L '+fmtL(p.totalDevengado)) +
+      dpRow('Deuda Pendiente', '<span style="color:'+(parseFloat(p.deuda)<0?'var(--rojo)':'inherit')+'">L '+fmtL(p.deuda)+'</span>') +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Avance del Proyecto</div>' +
+      '<div class="avance-block">' +
+        '<div class="avance-row"><div class="avance-label"><span>Avance Físico</span><span style="color:var(--az2);font-weight:500">'+af.toFixed(1)+'%</span></div><div class="avance-track"><div class="avance-fill" style="width:'+Math.min(af,100)+'%;background:var(--az3)"></div></div></div>' +
+        '<div class="avance-row"><div class="avance-label"><span>Avance Financiero <span style="font-size:9px;color:var(--gris3)">(calculado)</span></span><span style="color:var(--verde);font-weight:500">'+afin.toFixed(1)+'%</span></div><div class="avance-track"><div class="avance-fill" style="width:'+Math.min(afin,100)+'%;background:var(--verde)"></div></div></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Pagos ('+(p.pagos||[]).length+')</div>' + pagosHtml + '</div>' +
+    '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>';
+
+  document.getElementById('detailOverlay').classList.add('open');
+}
+
+function dpRow(label, val) {
+  var v = (val === null || val === undefined || val === '') ? '—' : val;
+  return '<div class="dp-row"><span class="dl">'+label+'</span><span class="dv">'+v+'</span></div>';
+}
+
+function toggleHistDetail(id) {
+  var el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function closeDetail(e) {
+  if (e && e.target !== document.getElementById('detailOverlay')) return;
+  document.getElementById('detailOverlay').classList.remove('open');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  FORMULARIO — ABRIR
+// ═══════════════════════════════════════════════════════════
+function openForm(u, idx) {
+  editingId = { u: u, idx: idx };
+  endosoCount = 0; pagoCount = 0;
+  var p      = idx !== null ? (DB[u][idx] || {}) : {};
+  var isEdit = idx !== null;
+  document.getElementById('modalTitle').textContent = (isEdit ? 'Editar' : 'Nuevo') + ' Proyecto — ' + UNIDADES[u].nombre;
+
+  function fv(field) {
+    var v = p[field];
+    if (v === null || v === undefined) return '';
+    return String(v).replace(/"/g, '&quot;');
+  }
+
+  var deptoOpts = DEPTOS.map(function(d) { return '<option'+(p.departamento===d?' selected':'')+'>'+d+'</option>'; }).join('');
+  var estadoOpts = ESTADOS.map(function(e) { return '<option'+(p.estado===e?' selected':'')+'>'+e+'</option>'; }).join('');
+  var tipoSup = p.tipoSupervision || 'externa';
+
+  document.getElementById('modalBody').innerHTML =
+  // ── SECCIÓN 1: DATOS GENERALES
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6.5h5M4 4.5h5M4 8.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Datos Generales</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>N° Proceso de Contratación</label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SITU-2025-001"/></div>' +
+      '<div class="form-group"><label>Estado del Proyecto <span class="req">*</span></label><select id="f_estado"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
+      '<div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Descripción completa del proyecto"/></div>' +
+      '<div class="form-group span2"><label>Descripción / Alcance</label><textarea id="f_descripcion" rows="2">'+fv('descripcion')+'</textarea></div>' +
+    '</div>' +
+    '<div class="form-grid g4" style="margin-top:10px">' +
+      '<div class="form-group"><label>Longitud (km)</label><input type="number" id="f_longitud" value="'+fv('longitud')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Beneficiarios</label><input type="number" id="f_beneficiarios" value="'+fv('beneficiarios')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Empleados Directos</label><input type="number" id="f_empleadosDirectos" value="'+fv('empleadosDirectos')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Empleados Indirectos</label><input type="number" id="f_empleadosIndirectos" value="'+fv('empleadosIndirectos')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+    '</div>' +
+  '</div>' +
+  // ── SECCIÓN 2: UBICACIÓN
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1C4.567 1 3 2.567 3 4.5c0 2.5 3.5 7.5 3.5 7.5S10 7 10 4.5C10 2.567 8.433 1 6.5 1z" stroke="currentColor" stroke-width="1.2"/><circle cx="6.5" cy="4.5" r="1.2" stroke="currentColor" stroke-width="1.2"/></svg>Ubicación Geográfica</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Departamento <span class="req">*</span></label><select id="f_departamento"><option value="">— Seleccione —</option>'+deptoOpts+'</select></div>' +
+      '<div class="form-group"><label>Municipio</label><input type="text" id="f_municipio" value="'+fv('municipio')+'"/></div>' +
+      '<div class="form-group"><label>Aldea / Barrio / Caserío</label><input type="text" id="f_aldeaBarrio" value="'+fv('aldeaBarrio')+'"/></div>' +
+      '<div class="form-group"><label>Latitud GPS</label><input type="text" id="f_latitud" value="'+fv('latitud')+'" placeholder="14.081389" oninput="this.value=this.value.replace(/[^0-9.\-]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Longitud GPS</label><input type="text" id="f_longitudRef" value="'+fv('longitudRef')+'" placeholder="-87.206944" oninput="this.value=this.value.replace(/[^0-9.\-]/g,\'\')"/></div>' +
+    '</div>' +
+  '</div>' +
+  // ── SECCIÓN 3: CONSTRUCTORA
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="5" width="11" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5V3a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.2"/></svg>Empresa Constructora</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Empresa Constructora <span class="req">*</span></label><input type="text" id="f_constructora" value="'+fv('constructora')+'" placeholder="Razón social"/></div>' +
+      '<div class="form-group"><label>N° de Contrato</label><input type="text" id="f_noContrato" value="'+fv('noContrato')+'"/></div>' +
+      '<div class="form-group"><label>Nombre del Coordinador</label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>' +
+      '<div class="form-group"><label>Supervisor de Campo</label><input type="text" id="f_supervisor" value="'+fv('supervisor')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  // ── SECCIÓN 4: SUPERVISIÓN
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 12c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Supervisión del Proyecto</div>' +
+    '<div style="display:flex;gap:10px;margin-bottom:12px">' +
+      '<label id="lbl-sup-ext" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
+        '<input type="radio" name="tipoSup" value="externa" '+(tipoSup==='externa'?'checked':'')+' onchange="toggleSup(\'externa\')" style="accent-color:var(--az2)"/>' +
+        '<div><div style="font-weight:500">Supervisión Externa</div><div style="font-size:10px;color:var(--gris3)">Empresa contratada</div></div>' +
+      '</label>' +
+      '<label id="lbl-sup-int" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
+        '<input type="radio" name="tipoSup" value="interna" '+(tipoSup==='interna'?'checked':'')+' onchange="toggleSup(\'interna\')" style="accent-color:var(--az2)"/>' +
+        '<div><div style="font-weight:500">Supervisión Interna</div><div style="font-size:10px;color:var(--gris3)">Personal DGCV</div></div>' +
+      '</label>' +
+    '</div>' +
+    '<div id="sup-ext-fields">' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>Empresa Supervisora</label><input type="text" id="f_supervisora" value="'+fv('supervisora')+'"/></div>' +
+        '<div class="form-group"><label>N° Contrato Supervisora</label><input type="text" id="f_noContratoSup" value="'+fv('noContratoSup')+'"/></div>' +
+        '<div class="form-group"><label>Contratos que Supervisa</label><input type="text" id="f_contratosSupervisa" value="'+fv('contratosSupervisa')+'"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div id="sup-int-fields" style="display:none"><div style="background:var(--az7);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--az2)">Este proyecto cuenta con supervisión interna de la DGCV.</div></div>' +
+  '</div>' +
+  // ── SECCIÓN 5: FECHAS
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 1v2M9 1v2M1 6h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Fechas y Plazo de Ejecución</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Fecha de Adjudicación</label><input type="date" id="f_fechaAdjudicacion" value="'+fv('fechaAdjudicacion')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Firma del Contrato</label><input type="date" id="f_fechaContrato" value="'+fv('fechaContrato')+'"/></div>' +
+      '<div class="form-group"><label>Plazo (días calendario)</label><input type="number" id="f_plazo" value="'+fv('plazo')+'" min="1" placeholder="365" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Fecha de Inicio de Obras <span class="req">*</span></label><input type="date" id="f_fechaInicio" value="'+fv('fechaInicio')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Finalización Programada</label><input type="date" id="f_fechaFinObra" value="'+fv('fechaFinObra')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  // ── SECCIÓN 6: GARANTÍAS
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1L9 4H12L9.5 6.5L10.5 9.5L6.5 7.5L2.5 9.5L3.5 6.5L1 4H4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>Garantías / Fianzas</div>' +
+    '<div style="background:var(--az7);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--az2);margin-bottom:6px">GARANTÍA DE ANTICIPO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaAnticipo" value="'+fv('nFianzaAnticipo')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFA" value="'+fv('iniFA')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFA" value="'+fv('finFA')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaAnticipo" value="'+fv('montoFianzaAnticipo')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:var(--verde-l);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--verde);margin-bottom:6px">GARANTÍA DE CUMPLIMIENTO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCumplimiento" value="'+fv('nFianzaCumplimiento')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFC" value="'+fv('iniFC')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFC" value="'+fv('finFC')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCumplimiento" value="'+fv('montoFianzaCumplimiento')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:#FDF3E3;border-radius:6px;padding:10px 12px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--amarillo);margin-bottom:6px">GARANTÍA DE CALIDAD</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCalidad" value="'+fv('nFianzaCalidad')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFCal" value="'+fv('iniFCal')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFCal" value="'+fv('finFCal')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCalidad" value="'+fv('montoFianzaCalidad')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>' +
+  // ── SECCIÓN 7: ENDOSOS
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M2 10L5 7M5 7L8 10M5 7V3M10 3h1a1 1 0 010 2h-1M10 5v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Endosos de Garantías</div>' +
+    '<div id="endosos-container"></div>' +
+    '<button class="add-row-btn" onclick="addEndoso()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Endoso</button>' +
+  '</div>' +
+  // ── SECCIÓN 8: FINANCIERO Y PAGOS
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera y Avances</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Monto Contrato Inicial (L) <span class="req">*</span></label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Monto Modificación / Adenda (L)</label><input type="number" id="f_montoModificacion" value="'+fv('montoModificacion')+'" step="0.01" min="0" placeholder="Solo si aplica" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+    '</div>' +
+    '<div class="form-grid g1" style="margin-top:10px">' +
+      '<div class="form-group"><label>Avance Físico de la Obra (%) <span class="req">*</span></label>' +
+        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+(fv('avanceFisico')||0)+'%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">'+(fv('avanceFisico')||0)+'%</span></div>' +
+        '<div class="form-hint">El avance financiero se calcula automáticamente desde los pagos</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
+    '<div id="pagos-container"></div>' +
+    '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
+    '<div class="totalizador" id="totalizador">' +
+      '<div class="tot-item"><strong id="tot-contrato">L 0.00</strong>Monto vigente</div>' +
+      '<div class="tot-item"><strong id="tot-devengado">L 0.00</strong>Total devengado</div>' +
+      '<div class="tot-item"><strong id="tot-deuda">L 0.00</strong>Deuda pendiente</div>' +
+      '<div class="tot-item"><strong id="tot-pct" style="color:var(--verde)">0.00%</strong>Avance financiero</div>' +
+    '</div>' +
+  '</div>';
+
+  document.getElementById('modalOverlay').classList.add('open');
+
+  // Init supervision toggle
+  toggleSup(tipoSup);
+
+  // Init endosos and pagos
+  (p.endosos || []).forEach(function(e) { addEndoso(e); });
+  (p.pagos   || []).forEach(function(pg){ addPago(pg); });
+  if (!(p.pagos||[]).length) addPago();
+  updateFianzaOpts();
+  recalcPagos();
+}
+
+// ── Supervisión toggle ──────────────────
+function toggleSup(tipo) {
+  var extF = document.getElementById('sup-ext-fields');
+  var intF = document.getElementById('sup-int-fields');
+  var lE   = document.getElementById('lbl-sup-ext');
+  var lI   = document.getElementById('lbl-sup-int');
+  if (extF) extF.style.display = tipo === 'externa' ? 'block' : 'none';
+  if (intF) intF.style.display = tipo === 'interna' ? 'block' : 'none';
+  if (lE)  { lE.style.borderColor = tipo==='externa' ? 'var(--az4)' : 'var(--border)'; lE.style.background = tipo==='externa' ? 'var(--az7)' : '#fff'; }
+  if (lI)  { lI.style.borderColor = tipo==='interna' ? 'var(--az4)' : 'var(--border)'; lI.style.background = tipo==='interna' ? 'var(--az7)' : '#fff'; }
+}
+
+function clampPct(inp) {
+  var v = parseFloat(inp.value);
+  if (!isNaN(v)) { if(v<0) inp.value=0; if(v>100) inp.value=100; }
+}
+
+function updateAvBar() {
+  var v = parseFloat(document.getElementById('f_avanceFisico').value) || 0;
+  var b = document.getElementById('avf-bar');
+  var l = document.getElementById('avf-lbl');
+  if (b) b.style.width = Math.min(v,100) + '%';
+  if (l) l.textContent = v + '%';
+}
+
+// ── Garantías / Endosos ─────────────────
+function getFianzaOpts(selected) {
+  var ids   = ['f_nFianzaAnticipo','f_nFianzaCumplimiento','f_nFianzaCalidad'];
+  var labels= ['Anticipo','Cumplimiento','Calidad'];
+  var opts  = '<option value="">— Seleccione fianza —</option>';
+  ids.forEach(function(id, i) {
+    var val = (document.getElementById(id)||{}).value || '';
+    if (val) opts += '<option value="'+val+'"'+(selected===val?' selected':'')+'>'+val+' ('+labels[i]+')</option>';
+  });
+  return opts;
+}
+
+function updateFianzaOpts() {
+  document.querySelectorAll('.endoso-fianza-select').forEach(function(sel) {
+    var cur = sel.value; sel.innerHTML = getFianzaOpts(cur);
+  });
+}
+
+function addEndoso(data) {
+  data = data || {};
+  endosoCount++;
+  var n   = endosoCount;
+  var con = document.getElementById('endosos-container');
+  var div = document.createElement('div');
+  div.className = 'endoso-card'; div.id = 'endoso-' + n;
+  div.innerHTML =
+    '<div class="endoso-tag">Endoso N° '+n+'</div>' +
+    '<button class="endoso-remove" onclick="document.getElementById(\'endoso-'+n+'\').remove()">✕</button>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>N° Endoso</label><input type="text" class="end-num" value="'+(data.numEndoso||'')+'"/></div>' +
+      '<div class="form-group"><label>Garantía vinculada</label><select class="endoso-fianza-select">'+getFianzaOpts(data.fianzaVinculada||'')+'</select></div>' +
+      '<div class="form-group"><label>Fecha del Endoso</label><input type="date" class="end-fecha" value="'+(data.fechaEndoso||'')+'"/></div>' +
+      '<div class="form-group"><label>Nueva Fecha Vencimiento</label><input type="date" class="end-fechaVenc" value="'+(data.nuevaFechaVenc||'')+'"/></div>' +
+      '<div class="form-group"><label>Monto (L)</label><input type="number" class="end-monto" value="'+(data.montoEndoso||'')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Descripción / Motivo</label><input type="text" class="end-desc" value="'+(data.descripcionEndoso||'')+'"/></div>' +
+    '</div>';
+  con.appendChild(div);
+}
+
+// ── Pagos ───────────────────────────────
+function addPago(data) {
+  data = data || {};
+  pagoCount++;
+  var n   = pagoCount;
+  var con = document.getElementById('pagos-container');
+  var div = document.createElement('div');
+  div.className = 'pago-card'; div.id = 'pago-' + n;
+  div.innerHTML =
+    '<div class="pago-num">Pago N° '+n+'</div>' +
+    '<button class="pago-remove" onclick="document.getElementById(\'pago-'+n+'\').remove();recalcPagos()">✕</button>' +
+    '<div class="form-grid g2" style="margin-bottom:8px">' +
+      '<div class="form-group"><label>Monto del Pago (L) <span class="req">*</span></label><input type="number" class="pago-monto" value="'+(data.monto||'')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Fecha de Ingreso / Registro</label><input type="date" class="pago-fechaIngreso" value="'+(data.fechaIngreso||data.fecha||'')+'"/></div>' +
+    '</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Período — Fecha Inicio</label><input type="date" class="pago-periodoIni" value="'+(data.periodoIni||'')+'"/></div>' +
+      '<div class="form-group"><label>Período — Fecha Fin</label><input type="date" class="pago-periodoFin" value="'+(data.periodoFin||'')+'"/></div>' +
+      '<div class="form-group"><label>Contexto / Descripción</label><input type="text" class="pago-ctx" value="'+(data.contexto||'')+'" placeholder="Ej. Anticipo, Estimación N°1…"/></div>' +
+    '</div>';
+  con.appendChild(div);
+  recalcPagos();
+}
+
+function recalcPagos() {
+  var mI  = parseFloat((document.getElementById('f_montoContratoInicial')||{}).value) || 0;
+  var mM  = parseFloat((document.getElementById('f_montoModificacion')||{}).value)    || 0;
+  var vig = mM > 0 ? mM : mI;
+  var dev = 0;
+  document.querySelectorAll('#pagos-container .pago-monto').forEach(function(i) { dev += parseFloat(i.value) || 0; });
+  var deuda = vig - dev;
+  var pct   = vig > 0 ? (dev / vig * 100) : 0;
+  var fmt   = function(n) { return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var tc=document.getElementById('tot-contrato');   if(tc) tc.textContent  = 'L ' + fmt(vig);
+  var td=document.getElementById('tot-devengado');  if(td) td.textContent  = 'L ' + fmt(dev);
+  var tdd=document.getElementById('tot-deuda');     if(tdd){ tdd.textContent = 'L ' + fmt(deuda); tdd.style.color = deuda < 0 ? 'var(--rojo)' : 'var(--az1)'; }
+  var tp=document.getElementById('tot-pct');        if(tp) tp.textContent  = pct.toFixed(2) + '%';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  FORMULARIO — GUARDAR
+// ═══════════════════════════════════════════════════════════
+function saveProject() {
+  var u   = editingId.u;
+  var idx = editingId.idx;
+  function g(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+
+  // Validación
+  var errs = [];
+  if (!g('f_proyecto'))            errs.push('Nombre del Proyecto');
+  if (!g('f_estado'))              errs.push('Estado');
+  if (!g('f_departamento'))        errs.push('Departamento');
+  if (!g('f_constructora'))        errs.push('Empresa Constructora');
+  if (!g('f_fechaInicio'))         errs.push('Fecha de Inicio');
+  if (!g('f_montoContratoInicial'))errs.push('Monto de Contrato');
+  if (!g('f_avanceFisico'))        errs.push('Avance Físico');
+  if (errs.length) { showToast('Campos requeridos: ' + errs.join(', '), 'err'); return; }
+
+  var tipoSup = (document.querySelector('[name="tipoSup"]:checked') || {}).value || 'externa';
+
+  // Recolectar endosos
+  var endosos = [];
+  document.querySelectorAll('#endosos-container .endoso-card').forEach(function(card) {
+    var e = {
+      numEndoso:         (card.querySelector('.end-num')            ||{}).value||'',
+      fianzaVinculada:   (card.querySelector('.endoso-fianza-select')||{}).value||'',
+      fechaEndoso:       (card.querySelector('.end-fecha')          ||{}).value||'',
+      nuevaFechaVenc:    (card.querySelector('.end-fechaVenc')       ||{}).value||'',
+      montoEndoso:       (card.querySelector('.end-monto')          ||{}).value||'',
+      descripcionEndoso: (card.querySelector('.end-desc')           ||{}).value||''
+    };
+    if (e.numEndoso || e.fianzaVinculada) endosos.push(e);
+  });
+
+  // Recolectar pagos
+  var pagos = [];
+  document.querySelectorAll('#pagos-container .pago-card').forEach(function(card) {
+    var pg = {
+      monto:        (card.querySelector('.pago-monto')       ||{}).value||'',
+      fechaIngreso: (card.querySelector('.pago-fechaIngreso')||{}).value||'',
+      periodoIni:   (card.querySelector('.pago-periodoIni')  ||{}).value||'',
+      periodoFin:   (card.querySelector('.pago-periodoFin')  ||{}).value||'',
+      contexto:     (card.querySelector('.pago-ctx')         ||{}).value||''
+    };
+    if (pg.monto) pagos.push(pg);
+  });
+
+  // Calcular totales
+  var mI  = parseFloat(g('f_montoContratoInicial')) || 0;
+  var mM  = parseFloat(g('f_montoModificacion'))    || 0;
+  var vig = mM > 0 ? mM : mI;
+  var dev = pagos.reduce(function(a,pg) { return a + (parseFloat(pg.monto)||0); }, 0);
+  var avFin = vig > 0 ? parseFloat((dev/vig*100).toFixed(2)) : 0;
+
+  // Historial
+  var prevProj = idx !== null ? DB[u][idx] : null;
+  var cambios  = [];
+  if (prevProj) {
+    var campos = { proyecto:'Nombre',estado:'Estado',constructora:'Constructora',departamento:'Dpto',avanceFisico:'Av. Físico',montoContratoInicial:'Monto Contrato' };
+    Object.keys(campos).forEach(function(k) {
+      var prev = String(prevProj[k]||'');
+      var curr = g('f_'+k);
+      if (prev !== curr) cambios.push(campos[k]+': "'+prev+'" → "'+curr+'"');
+    });
+    if ((prevProj.pagos||[]).length !== pagos.length) cambios.push('Pagos: '+(prevProj.pagos||[]).length+' → '+pagos.length);
+    if ((prevProj.endosos||[]).length !== endosos.length) cambios.push('Endosos: '+(prevProj.endosos||[]).length+' → '+endosos.length);
+    if (!cambios.length) cambios.push('Sin cambios detectados en campos principales');
+  } else {
+    cambios.push('Proyecto creado · '+pagos.length+' pago(s) · '+endosos.length+' endoso(s)');
+  }
+
+  var histEntry = {
+    fecha:   new Date().toISOString(),
+    usuario: currentUser.nombre,
+    unidad:  currentUser.rol,
+    accion:  prevProj ? 'Actualización' : 'Creación',
+    cambios: cambios
+  };
+
+  var proj = {
+    nProceso:       g('f_nProceso'),
+    proyecto:       g('f_proyecto'),
+    descripcion:    g('f_descripcion'),
+    estado:         g('f_estado'),
+    longitud:       g('f_longitud'),
+    beneficiarios:  g('f_beneficiarios'),
+    empleadosDirectos:   g('f_empleadosDirectos'),
+    empleadosIndirectos: g('f_empleadosIndirectos'),
+    departamento:   g('f_departamento'),
+    municipio:      g('f_municipio'),
+    aldeaBarrio:    g('f_aldeaBarrio'),
+    latitud:        g('f_latitud'),
+    longitudRef:    g('f_longitudRef'),
+    constructora:   g('f_constructora'),
+    noContrato:     g('f_noContrato'),
+    coordinador:    g('f_coordinador'),
+    supervisor:     g('f_supervisor'),
+    tipoSupervision: tipoSup,
+    supervisora:    tipoSup==='externa' ? g('f_supervisora')       : 'Supervisión Interna DGCV',
+    noContratoSup:  tipoSup==='externa' ? g('f_noContratoSup')     : '',
+    contratosSupervisa: tipoSup==='externa' ? g('f_contratosSupervisa') : '',
+    fechaAdjudicacion: g('f_fechaAdjudicacion'),
+    fechaContrato:  g('f_fechaContrato'),
+    plazo:          g('f_plazo'),
+    fechaInicio:    g('f_fechaInicio'),
+    fechaFinObra:   g('f_fechaFinObra'),
+    nFianzaAnticipo:     g('f_nFianzaAnticipo'),    iniFA:  g('f_iniFA'),   finFA:  g('f_finFA'),   montoFianzaAnticipo:     g('f_montoFianzaAnticipo'),
+    nFianzaCumplimiento: g('f_nFianzaCumplimiento'),iniFC:  g('f_iniFC'),   finFC:  g('f_finFC'),   montoFianzaCumplimiento: g('f_montoFianzaCumplimiento'),
+    nFianzaCalidad:      g('f_nFianzaCalidad'),     iniFCal:g('f_iniFCal'), finFCal:g('f_finFCal'), montoFianzaCalidad:      g('f_montoFianzaCalidad'),
+    endosos:        endosos,
+    montoContratoInicial: g('f_montoContratoInicial'),
+    montoModificacion:    g('f_montoModificacion'),
+    avanceFisico:   g('f_avanceFisico'),
+    avanceFinanciero: String(avFin),
+    pagos:          pagos,
+    totalDevengado: dev.toFixed(2),
+    deuda:          (vig - dev).toFixed(2),
+    historial:      (prevProj ? (prevProj.historial || []) : []).concat([histEntry]),
+    _saved:         new Date().toISOString(),
+    _unidad:        u,
+    _sid:           prevProj ? prevProj._sid : undefined
+  };
+
+  // Update local cache first
+  if (idx === null) DB[u].push(proj);
+  else DB[u][idx] = proj;
+
+  closeModal();
+  updateBadges();
+  endosoCount = 0; pagoCount = 0;
+
+  // Navigate to unidad list immediately
+  var isNew = idx === null;
+  showView(u, document.getElementById('nav-' + u));
+  showBanner(isNew ? '✓ Proyecto "' + proj.proyecto.slice(0,40) + '" registrado exitosamente' : '✓ Proyecto actualizado correctamente');
+
+  // Save to Supabase (async — doesn't block the UI)
+  persistirProyecto(u, proj)
+    .then(function(newId) {
+      // Attach Supabase ID to local object so future edits do UPDATE
+      if (isNew) {
+        var localIdx = DB[u].length - 1;
+        if (DB[u][localIdx] && !DB[u][localIdx]._sid) DB[u][localIdx]._sid = newId;
+        proj._sid = newId;
+      }
+      saveLocalDB();
+      showToast(isNew ? 'Guardado en base de datos.' : 'Actualizado en base de datos.', 'ok');
+    })
+    .catch(function(e) {
+      saveLocalDB(); // Keep local copy
+      showToast('Error al guardar en BD: ' + e.message + '. Dato guardado localmente.', 'err');
+    });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ELIMINAR PROYECTO
+// ═══════════════════════════════════════════════════════════
+function deleteProject(u, i) {
+  var proj = DB[u][i];
+  if (!proj) return;
+  if (!confirm('¿Confirma eliminar "' + proj.proyecto + '"?\nEsta acción no se puede deshacer.')) return;
+  var sid = proj._sid;
+  DB[u].splice(i, 1);
+  saveLocalDB();
+  updateBadges();
+  renderUnidad(u);
+  showToast('Proyecto eliminado.', 'ok');
+  if (sid) {
+    supaDelete('proyectos', sid).catch(function(e) {
+      showToast('Eliminado localmente pero error en BD: ' + e.message, 'err');
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MODALES — CERRAR
+// ═══════════════════════════════════════════════════════════
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modalOverlay')) return;
+  document.getElementById('modalOverlay').classList.remove('open');
+  editingId = null; endosoCount = 0; pagoCount = 0;
+}
+function closeDetail(e) {
+  if (e && e.target !== document.getElementById('detailOverlay')) return;
+  document.getElementById('detailOverlay').classList.remove('open');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RECARGAR DESDE SUPABASE
+// ═══════════════════════════════════════════════════════════
+function recargarDesdeSupabase() {
+  var btn = document.getElementById('syncBtn');
+  if (btn) { btn.textContent = 'Cargando...'; btn.disabled = true; }
+  cargarProyectos().then(function() {
+    saveLocalDB();
+    updateBadges();
+    if (currentView === 'dashboard') renderDashboard();
+    else renderUnidad(currentView);
+    if (btn) { btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 6A4 4 0 116 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/><path d="M6 2l2-2M6 2L4 0" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Recargar datos'; btn.disabled = false; }
+    showToast(dbOnline ? 'Datos actualizados desde la base de datos.' : 'Sin conexión a la base de datos.', dbOnline ? 'ok' : 'err');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TECLADO
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') { closeModal(); closeDetail(); }
+});
+</script>
+</body>
+</html>
