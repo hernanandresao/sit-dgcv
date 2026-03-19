@@ -556,6 +556,12 @@ select{cursor:pointer;}
     <span class="nav-badge" id="badge-ldv">0</span>
   </div>
 
+  <div class="sidenav-section" id="nav-usuarios-section" style="display:none;">Administración</div>
+  <div class="nav-item" onclick="showView('usuarios',this)" id="nav-usuarios" style="display:none;">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/><path d="M1 14c0-3 2-5 5-5s5 2 5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M11 7l2 2 3-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>Gestión de Usuarios</span>
+  </div>
+
   <div class="sidenav-bottom">
     <div class="logout-btn" onclick="doLogout()">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 7H13M10 4l3 3-3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M7 2H2a1 1 0 00-1 1v8a1 1 0 001 1h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -694,6 +700,12 @@ function genUUID() {
   });
 }
 
+// SHA-256 via Web Crypto API (todos los navegadores modernos lo tienen)
+async function sha256hex(msg) {
+  var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
+  return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+}
+
 var H_BASE  = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
 var H_WRITE = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal' });
 var H_DEL   = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal' });
@@ -741,13 +753,14 @@ function supaDelete(table, id) {
 // ═══════════════════════════════════════════════════════════
 //  CONSTANTES DEL SISTEMA
 // ═══════════════════════════════════════════════════════════
-var USERS = {
-  admin: { pass:'admin2025', nombre:'Administrador',           rol:'Administración General' },
-  rvp:   { pass:'rvp2025',   nombre:'Coord. Pavimentada',      rol:'Red Vial Pavimentada' },
-  rvnp:  { pass:'rvnp2025',  nombre:'Coord. No Pavimentada',   rol:'Red Vial No Pavimentada' },
-  rre:   { pass:'rre2025',   nombre:'Coord. Emergencias',      rol:'Respuesta Rápida a Emergencias' },
-  macro: { pass:'macro2025', nombre:'Coord. Macroproyectos',   rol:'Macroproyectos' },
-  ldv:   { pass:'ldv2025',   nombre:'Coord. Limpieza DV',      rol:'Limpieza de Derecho de Vía' }
+// USERS ya no está hardcodeado — se consulta Supabase en el login
+var UNIDAD_NOMBRES = {
+  admin: 'Administración General',
+  rvp:   'Red Vial Pavimentada',
+  rvnp:  'Red Vial No Pavimentada',
+  rre:   'Respuesta Rápida a Emergencias',
+  macro: 'Macroproyectos',
+  ldv:   'Limpieza de Derecho de Vía'
 };
 
 var UNIDADES = {
@@ -886,9 +899,9 @@ function persistirProyecto(unidad, proj) {
 // ═══════════════════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════════════════
-function doLogin() {
+async function doLogin() {
   var unidad = document.getElementById('loginUnidad').value;
-  var user   = document.getElementById('loginUser').value.trim();
+  var user   = document.getElementById('loginUser').value.trim().toLowerCase();
   var pass   = document.getElementById('loginPass').value;
   var err    = document.getElementById('loginError');
   var btn    = document.querySelector('.login-btn');
@@ -900,18 +913,52 @@ function doLogin() {
     err.textContent = 'Complete todos los campos.';
     return;
   }
-  var u = USERS[unidad];
-  if (!u || pass !== u.pass) {
-    err.style.display = 'block';
-    err.textContent = 'Credenciales incorrectas.';
-    return;
-  }
 
-  btn.textContent = 'Cargando...';
+  btn.textContent = 'Verificando...';
   btn.disabled = true;
 
-  cargarProyectos().then(function() {
-    currentUser = { unidad: unidad, nombre: u.nombre, rol: u.rol };
+  try {
+    // Hash SHA-256 de la contrasena antes de comparar con la BD
+    var passHash = await sha256hex(pass);
+
+    // Buscar usuario en Supabase
+    var rows = await supaGet('usuarios',
+      'select=*&username=eq.' + encodeURIComponent(user) +
+      '&password=eq.' + encodeURIComponent(passHash) +
+      '&activo=eq.true'
+    );
+
+    if (!rows || rows.length === 0) {
+      err.style.display = 'block';
+      err.textContent = 'Credenciales incorrectas o usuario inactivo.';
+      btn.textContent = 'Ingresar al Sistema';
+      btn.disabled = false;
+      return;
+    }
+
+    var u = rows[0];
+
+    // Verificar que la unidad seleccionada coincide (admin puede elegir cualquiera)
+    if (u.unidad !== 'admin' && u.unidad !== unidad) {
+      err.style.display = 'block';
+      err.textContent = 'El usuario no pertenece a la unidad seleccionada.';
+      btn.textContent = 'Ingresar al Sistema';
+      btn.disabled = false;
+      return;
+    }
+
+    // Login exitoso — cargar proyectos
+    btn.textContent = 'Cargando datos...';
+    await cargarProyectos();
+
+    var efectiveUnidad = u.unidad === 'admin' ? unidad : u.unidad;
+    currentUser = {
+      id:      u.id,
+      unidad:  efectiveUnidad,
+      nombre:  u.nombre,
+      rol:     UNIDAD_NOMBRES[efectiveUnidad] || u.unidad,
+      esAdmin: u.unidad === 'admin' || u.rol === 'admin'
+    };
 
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appShell').style.display    = 'flex';
@@ -924,10 +971,16 @@ function doLogin() {
     if (syncStatus) syncStatus.style.display = 'flex';
     if (syncBtn)    syncBtn.style.display    = 'flex';
 
-    if (unidad !== 'admin') {
+    // Item de gestion de usuarios — solo visible para admins
+    var navUsuarios        = document.getElementById('nav-usuarios');
+    var navUsuariosSection = document.getElementById('nav-usuarios-section');
+    if (navUsuarios)        navUsuarios.style.display        = currentUser.esAdmin ? 'flex' : 'none';
+    if (navUsuariosSection) navUsuariosSection.style.display = currentUser.esAdmin ? 'block' : 'none';
+
+    if (!currentUser.esAdmin) {
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
         var v = el.id.replace('nav-', '');
-        if (v !== 'dashboard' && v !== unidad) el.style.display = 'none';
+        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios') el.style.display = 'none';
       });
     }
 
@@ -937,8 +990,14 @@ function doLogin() {
     btn.textContent = 'Ingresar al Sistema';
     btn.disabled = false;
 
-    showToast(dbOnline ? 'Conectado. Datos cargados desde Supabase.' : 'Sesión iniciada (sin conexión a BD).', dbOnline ? 'ok' : 'err');
-  });
+    showToast(dbOnline ? 'Bienvenido, ' + u.nombre + '.' : 'Sesion iniciada (sin conexion a BD).', dbOnline ? 'ok' : 'err');
+
+  } catch(e) {
+    err.style.display = 'block';
+    err.textContent = 'Error de conexion. Verifique su red.';
+    btn.textContent = 'Ingresar al Sistema';
+    btn.disabled = false;
+  }
 }
 
 function doLogout() {
@@ -949,6 +1008,10 @@ function doLogout() {
   document.getElementById('loginPass').value = '';
   document.getElementById('loginError').style.display = 'none';
   document.querySelectorAll('.nav-item').forEach(function(el) { el.style.display = ''; });
+  var navUsuarios = document.getElementById('nav-usuarios');
+  var navUsuariosSection = document.getElementById('nav-usuarios-section');
+  if (navUsuarios) navUsuarios.style.display = 'none';
+  if (navUsuariosSection) navUsuariosSection.style.display = 'none';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -959,6 +1022,7 @@ function showView(view, el) {
   document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
   if (el) el.classList.add('active');
   if (view === 'dashboard') renderDashboard();
+  else if (view === 'usuarios') renderUsuariosPanel();
   else renderUnidad(view);
 }
 
@@ -1682,8 +1746,167 @@ function recargarDesdeSupabase() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  TECLADO
+//  GESTIÓN DE USUARIOS (solo admin)
 // ═══════════════════════════════════════════════════════════
+function renderUsuariosPanel() {
+  if (!currentUser || !currentUser.esAdmin) {
+    document.getElementById('mainContent').innerHTML = '<div class="empty-state"><p>Acceso restringido.</p></div>';
+    return;
+  }
+  var mc = document.getElementById('mainContent');
+  mc.innerHTML = '<div class="page-header"><h2>Gestión de Usuarios</h2><p>Administre los accesos al sistema por unidad.</p>' +
+    '<div class="page-actions"><button class="btn btn-primary" onclick="abrirModalUsuario()">+ Nuevo Usuario</button></div></div>' +
+    '<div class="table-wrap"><div class="table-toolbar"><h3>Usuarios registrados</h3></div>' +
+    '<div id="tablaUsuarios"><div class="empty-state"><p>Cargando...</p></div></div></div>';
+  cargarTablaUsuarios();
+}
+
+async function cargarTablaUsuarios() {
+  try {
+    var rows = await supaGet('usuarios', 'select=*&order=unidad.asc,nombre.asc');
+    var tbody = '';
+    (rows || []).forEach(function(u, i) {
+      var estadoPill = u.activo
+        ? '<span class="pill ejec">Activo</span>'
+        : '<span class="pill susp">Inactivo</span>';
+      tbody += '<tr>' +
+        '<td><strong>' + u.username + '</strong></td>' +
+        '<td>' + u.nombre + '</td>' +
+        '<td>' + (UNIDAD_NOMBRES[u.unidad] || u.unidad) + '</td>' +
+        '<td>' + (u.rol === 'admin' ? 'Administrador' : 'Coordinador') + '</td>' +
+        '<td>' + estadoPill + '</td>' +
+        '<td><div class="tbl-actions">' +
+          '<button class="tbl-btn edit" onclick="abrirModalUsuario(\'' + u.id + '\')">Editar</button>' +
+          '<button class="tbl-btn" onclick="cambiarEstadoUsuario(\'' + u.id + '\',' + !u.activo + ')">' + (u.activo ? 'Desactivar' : 'Activar') + '</button>' +
+          '<button class="tbl-btn" style="color:var(--rojo)" onclick="cambiarPasswordUsuario(\'' + u.id + '\',\'' + u.username + '\')">Cambiar contraseña</button>' +
+        '</div></td>' +
+      '</tr>';
+    });
+    document.getElementById('tablaUsuarios').innerHTML =
+      '<table class="tbl"><thead><tr>' +
+        '<th>Usuario</th><th>Nombre</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Acciones</th>' +
+      '</tr></thead><tbody>' + tbody + '</tbody></table>';
+  } catch(e) {
+    document.getElementById('tablaUsuarios').innerHTML = '<div class="empty-state"><p>Error al cargar usuarios: ' + e.message + '</p></div>';
+  }
+}
+
+function abrirModalUsuario(id) {
+  var esEdicion = !!id;
+  var body = '<div class="form-section">' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Nombre completo <span class="req">*</span></label>' +
+        '<input type="text" id="u_nombre" placeholder="Ej: Juan Pérez"/></div>' +
+      '<div class="form-group"><label>Nombre de usuario <span class="req">*</span></label>' +
+        '<input type="text" id="u_username" placeholder="Ej: jperez" ' + (esEdicion ? 'readonly style="background:var(--gris6)"' : '') + '/></div>' +
+    '</div>' +
+    '<div class="form-grid g2" style="margin-top:12px">' +
+      '<div class="form-group"><label>Unidad <span class="req">*</span></label>' +
+        '<select id="u_unidad">' +
+          '<option value="">— Seleccione —</option>' +
+          Object.entries(UNIDAD_NOMBRES).map(function(e){ return '<option value="'+e[0]+'">'+e[1]+'</option>'; }).join('') +
+        '</select></div>' +
+      '<div class="form-group"><label>Rol <span class="req">*</span></label>' +
+        '<select id="u_rol"><option value="coordinador">Coordinador</option><option value="admin">Administrador</option></select></div>' +
+    '</div>' +
+    (!esEdicion ? '<div class="form-grid g2" style="margin-top:12px">' +
+      '<div class="form-group"><label>Contraseña <span class="req">*</span></label>' +
+        '<input type="password" id="u_pass" placeholder="Mínimo 6 caracteres"/></div>' +
+      '<div class="form-group"><label>Confirmar contraseña <span class="req">*</span></label>' +
+        '<input type="password" id="u_pass2" placeholder="Repita la contraseña"/></div>' +
+    '</div>' : '') +
+  '</div>';
+
+  // Reutilizar modal principal
+  document.getElementById('modalTitle').textContent = esEdicion ? 'Editar Usuario' : 'Nuevo Usuario';
+  document.getElementById('modalBody').innerHTML = body;
+  document.getElementById('modalOverlay').classList.add('open');
+
+  // Sobrescribir temporalmente el botón guardar
+  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+  btnGuardar.onclick = function() { guardarUsuario(id); };
+
+  // Si es edición, cargar datos actuales
+  if (esEdicion) {
+    supaGet('usuarios', 'select=*&id=eq.' + id).then(function(rows) {
+      if (!rows || !rows[0]) return;
+      var u = rows[0];
+      document.getElementById('u_nombre').value   = u.nombre;
+      document.getElementById('u_username').value = u.username;
+      document.getElementById('u_unidad').value   = u.unidad;
+      document.getElementById('u_rol').value      = u.rol;
+    });
+  }
+}
+
+async function guardarUsuario(id) {
+  var nombre   = (document.getElementById('u_nombre').value || '').trim();
+  var username = (document.getElementById('u_username').value || '').trim().toLowerCase();
+  var unidad   = document.getElementById('u_unidad').value;
+  var rol      = document.getElementById('u_rol').value;
+  var esEdicion = !!id;
+
+  if (!nombre || !username || !unidad) {
+    showToast('Complete los campos obligatorios.', 'err');
+    return;
+  }
+
+  var rowData = { nombre: nombre, username: username, unidad: unidad, rol: rol };
+
+  if (!esEdicion) {
+    var pass  = document.getElementById('u_pass').value;
+    var pass2 = document.getElementById('u_pass2').value;
+    if (!pass || pass.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', 'err'); return; }
+    if (pass !== pass2)           { showToast('Las contraseñas no coinciden.', 'err'); return; }
+    rowData.password = await sha256hex(pass);
+    rowData.activo   = true;
+  }
+
+  try {
+    if (esEdicion) {
+      await supaPatch('usuarios', id, rowData);
+      showToast('Usuario actualizado correctamente.', 'ok');
+    } else {
+      var newId = genUUID();
+      rowData.id = newId;
+      await supaPost('usuarios', rowData);
+      showToast('Usuario creado. Puede iniciar sesión de inmediato.', 'ok');
+    }
+    closeModal();
+    // Restaurar onclick del botón guardar al original
+    document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
+    renderUsuariosPanel();
+  } catch(e) {
+    showToast('Error al guardar: ' + e.message, 'err');
+  }
+}
+
+async function cambiarEstadoUsuario(id, nuevoEstado) {
+  var accion = nuevoEstado ? 'activar' : 'desactivar';
+  if (!confirm('¿Confirma ' + accion + ' este usuario?')) return;
+  try {
+    await supaPatch('usuarios', id, { activo: nuevoEstado });
+    showToast('Usuario ' + (nuevoEstado ? 'activado' : 'desactivado') + '.', 'ok');
+    cargarTablaUsuarios();
+  } catch(e) {
+    showToast('Error: ' + e.message, 'err');
+  }
+}
+
+async function cambiarPasswordUsuario(id, username) {
+  var newPass = prompt('Nueva contraseña para "' + username + '" (mínimo 6 caracteres):');
+  if (!newPass) return;
+  if (newPass.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', 'err'); return; }
+  try {
+    var hash = await sha256hex(newPass);
+    await supaPatch('usuarios', id, { password: hash });
+    showToast('Contraseña actualizada para ' + username + '.', 'ok');
+  } catch(e) {
+    showToast('Error: ' + e.message, 'err');
+  }
+}
+
+
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') { closeModal(); closeDetail(); }
 });
