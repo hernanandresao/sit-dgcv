@@ -1379,24 +1379,45 @@ var UNIT_NAV_LOGOS = {
 //  ALERTAS DE VENCIMIENTO DE FIANZAS
 // ═══════════════════════════════════════════════════════════
 function getAlertasFianzas() {
-  var hoy   = new Date(); hoy.setHours(0,0,0,0);
-  var d30   = new Date(hoy); d30.setDate(d30.getDate()+30);
-  var d60   = new Date(hoy); d60.setDate(d60.getDate()+60);
+  var hoy = new Date(); hoy.setHours(0,0,0,0);
   var alertas = [];
 
   Object.entries(DB).forEach(function(entry) {
     var unidadKey = entry[0]; var proyectos = entry[1];
     (proyectos||[]).forEach(function(p) {
+
+      // CONDICIÓN 2: proyecto Terminado → no genera alertas de fianzas
+      if (p.estado === 'Terminado') return;
+
+      // CONDICIÓN 3: devuelve la fecha efectiva de alerta para una fianza.
+      // Si existe un endoso vinculado a esa fianza con nueva fecha de vencimiento,
+      // se usa la fecha más reciente del endoso en lugar de la fecha original.
+      function fechaEfectiva(nFianza, fechaOriginal) {
+        if (!fechaOriginal || !nFianza) return fechaOriginal || null;
+        var endosos = p.endosos || [];
+        var vinculados = endosos.filter(function(e) {
+          return e.fianzaVinculada && e.nuevaFechaVenc &&
+                 e.fianzaVinculada.indexOf(nFianza) >= 0;
+        });
+        if (!vinculados.length) return fechaOriginal;
+        // Usar la fecha de vencimiento más lejana del endoso más reciente
+        vinculados.sort(function(a,b){
+          return a.nuevaFechaVenc > b.nuevaFechaVenc ? -1 : 1;
+        });
+        return vinculados[0].nuevaFechaVenc;
+      }
+
       var checks = [
-        { tipo:'ANTICIPO',      fecha:p.finFA,   n:p.nFianzaAnticipo     },
-        { tipo:'CUMPLIMIENTO',  fecha:p.finFC,   n:p.nFianzaCumplimiento },
-        { tipo:'CALIDAD',       fecha:p.finFCal, n:p.nFianzaCalidad      },
+        { tipo:'ANTICIPO',     n:p.nFianzaAnticipo,     fechaOrig:p.finFA,   fecha:fechaEfectiva(p.nFianzaAnticipo,     p.finFA)   },
+        { tipo:'CUMPLIMIENTO', n:p.nFianzaCumplimiento, fechaOrig:p.finFC,   fecha:fechaEfectiva(p.nFianzaCumplimiento, p.finFC)   },
+        { tipo:'CALIDAD',      n:p.nFianzaCalidad,      fechaOrig:p.finFCal, fecha:fechaEfectiva(p.nFianzaCalidad,      p.finFCal) },
       ];
+
       checks.forEach(function(c) {
         if (!c.fecha || !c.n) return;
         var f = new Date(c.fecha); f.setHours(0,0,0,0);
-        var diasRestantes = Math.round((f-hoy)/(1000*60*60*24));
-        var estado = diasRestantes < 0 ? 'vencida'
+        var diasRestantes = Math.round((f - hoy) / (1000*60*60*24));
+        var estado = diasRestantes < 0  ? 'vencida'
                    : diasRestantes <= 30 ? 'prox30'
                    : diasRestantes <= 60 ? 'prox60'
                    : null;
@@ -1407,6 +1428,7 @@ function getAlertasFianzas() {
           tipo:         c.tipo,
           n:            c.n,
           fecha:        c.fecha,
+          esEndoso:     c.fecha !== c.fechaOrig,
           diasRestantes:diasRestantes,
           estado:       estado
         });
@@ -1414,7 +1436,7 @@ function getAlertasFianzas() {
     });
   });
 
-  // Sort: vencidas first, then by days remaining
+  // Ordenar: vencidas primero, luego por días restantes
   alertas.sort(function(a,b){
     if (a.estado==='vencida' && b.estado!=='vencida') return -1;
     if (b.estado==='vencida' && a.estado!=='vencida') return  1;
@@ -1434,9 +1456,13 @@ function renderAlertasBanner(alertas) {
     var tagText  = a.estado==='vencida'
       ? 'Vencida hace '+(Math.abs(a.diasRestantes))+' día'+(Math.abs(a.diasRestantes)!==1?'s':'')
       : 'Vence en '+a.diasRestantes+' día'+(a.diasRestantes!==1?'s':'');
+    var endosoBadge = a.esEndoso
+      ? '<span style="font-size:8px;background:var(--verde-l);color:var(--verde);padding:1px 6px;border-radius:4px;margin-left:5px;font-weight:600;flex-shrink:0;">ENDOSO</span>'
+      : '';
     return '<div class="alerta-row">'
       +'<span class="alerta-tag '+tagClass+'">'+tagText+'</span>'
       +'<span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+a.proyecto+'</span>'
+      +endosoBadge
       +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;">'+a.tipo+'</span>'
       +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;font-family:var(--mono);font-size:10px;">'+a.n+'</span>'
       +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;">'+a.unidad.split(' ').slice(0,3).join(' ')+'</span>'
@@ -1798,7 +1824,7 @@ function openForm(u, idx) {
     '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6.5h5M4 4.5h5M4 8.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Datos Generales</div>' +
     '<div class="form-grid g2">' +
       '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SITU-2025-001"/></div>' +
-      '<div class="form-group"><label>Estado del Proyecto <span class="req">*</span></label><select id="f_estado"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
+      '<div class="form-group"><label>Estado del Proyecto <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
       '<div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Descripción completa del proyecto"/></div>' +
       '<div class="form-group span2"><label>Descripción / Alcance <span class="req">*</span></label><textarea id="f_descripcion" rows="2">'+fv('descripcion')+'</textarea></div>' +
     '</div>' +
@@ -1909,7 +1935,7 @@ function openForm(u, idx) {
     '</div>' +
     '<div class="form-grid g1" style="margin-top:10px">' +
       '<div class="form-group"><label>Avance Físico de la Obra (%) <span class="req">*</span></label>' +
-        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+(fv('avanceFisico')||0)+'%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">'+(fv('avanceFisico')||0)+'%</span></div>' +
+        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+(fv('avanceFisico')||0)+'%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">'+(fv('avanceFisico')||0)+'%</span></div>' +
         '<div class="form-hint">El avance financiero se calcula automáticamente desde los pagos</div>' +
       '</div>' +
     '</div>' +
@@ -1928,6 +1954,7 @@ function openForm(u, idx) {
 
   // Init supervision toggle
   toggleSup(tipoSup);
+  setTimeout(syncEstadoAvance, 0); // Sync estado/avance al abrir en modo edición
 
   // Init endosos and pagos
   (p.endosos || []).forEach(function(e) { addEndoso(e); });
@@ -1952,6 +1979,32 @@ function toggleSup(tipo) {
 function clampPct(inp) {
   var v = parseFloat(inp.value);
   if (!isNaN(v)) { if(v<0) inp.value=0; if(v>100) inp.value=100; }
+}
+
+// ── Condición 1: sincronización bidireccional estado ↔ avance físico ──
+function syncEstadoAvance() {
+  // "Terminado" seleccionado → fuerza avance a 100%
+  var est = (document.getElementById('f_estado') || {}).value;
+  var inp = document.getElementById('f_avanceFisico');
+  if (!inp) return;
+  if (est === 'Terminado') {
+    inp.value = '100';
+    updateAvBar();
+  }
+}
+
+function syncAvanceEstado() {
+  // Avance llega a 100% → cambia estado a "Terminado"
+  // Avance baja de 100% estando en "Terminado" → regresa a "En Ejecución"
+  var inp = document.getElementById('f_avanceFisico');
+  var sel = document.getElementById('f_estado');
+  if (!inp || !sel) return;
+  var v = parseFloat(inp.value);
+  if (v >= 100) {
+    sel.value = 'Terminado';
+  } else if (sel.value === 'Terminado' && v < 100) {
+    sel.value = 'En Ejecución';
+  }
 }
 
 function updateAvBar() {
