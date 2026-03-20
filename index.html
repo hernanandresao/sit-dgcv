@@ -557,7 +557,7 @@ select{cursor:pointer;}
   .tbl th,.tbl td{padding:7px 8px;}
   /* Ocultar columnas menos importantes en móvil */
   .tbl th:nth-child(3),.tbl td:nth-child(3),   /* Constructora */
-  .tbl th:nth-child(7),.tbl td:nth-child(7){    /* Fecha fin */
+  .tbl th:nth-child(7),.tbl td:nth-child(7){    /* N° Contrato */
     display:none;
   }
   .mini-bar{width:48px;}
@@ -671,6 +671,10 @@ select{cursor:pointer;}
   <button id="syncBtn" onclick="recargarDesdeSupabase()" style="display:none;align-items:center;gap:6px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.2);color:#fff;padding:5px 12px;border-radius:20px;font-size:11px;cursor:pointer;font-family:var(--font);transition:.2s;">
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 6A4 4 0 116 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/><path d="M6 2l2-2M6 2L4 0" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     Recargar datos
+  </button>
+  <button id="reportBtn" onclick="generarReporte()" style="display:none;align-items:center;gap:6px;background:rgba(212,168,32,.18);border:1px solid rgba(212,168,32,.4);color:#F0C040;padding:5px 12px;border-radius:20px;font-size:11px;cursor:pointer;font-family:var(--font);transition:.2s;">
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1.5" y="1" width="9" height="10" rx="1" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 4h5M3.5 6h5M3.5 8h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    Descargar Reporte
   </button>
   <div class="topbar-user" onclick="doLogout()">
     <div class="avatar" id="userAvatar">--</div>
@@ -1151,6 +1155,8 @@ async function doLogin() {
     var navUsuariosSection = document.getElementById('nav-usuarios-section');
     if (navUsuarios)        navUsuarios.style.display        = currentUser.esGlobalAdmin ? 'flex' : 'none';
     if (navUsuariosSection) navUsuariosSection.style.display = currentUser.esGlobalAdmin ? 'block' : 'none';
+    var reportBtn = document.getElementById('reportBtn');
+    if (reportBtn) reportBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
 
     if (currentUser.esGlobalViewer) {
       // Coord. General: ve todas las unidades pero sin opción de gestión de usuarios — nada se oculta en nav
@@ -1350,7 +1356,7 @@ function renderUnidad(u) {
       '<td><div style="font-size:11px;font-weight:500;color:var(--az2)">'+cPor+'</div>'+(uMod&&uMod.usuario!==cPor?'<div style="font-size:9px;color:var(--gris3)">Mod: '+uMod.usuario+'</div>':'')+'</td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill az-fill" style="width:'+Math.min(paf,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(paf.toFixed(1))+'%</div></td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill gr-fill" style="width:'+Math.min(pafin,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(pafin.toFixed(1))+'%</div></td>' +
-      '<td style="font-size:11px;font-family:var(--mono);color:var(--gris2)">'+(p.fechaFinObra||'—')+'</td>' +
+      '<td style="font-size:11px;font-family:var(--mono);color:var(--gris2)">'+(p.noContrato||'—')+'</td>' +
       '<td><span class="pill '+sc+'">'+(p.estado||'—')+'</span></td>' +
       '<td><div class="tbl-actions">' +
         '<button class="tbl-btn" onclick="openDetail(\''+u+'\','+i+')">Ver</button>' +
@@ -1379,15 +1385,28 @@ function renderUnidad(u) {
         (permsNew.canAdd ? '<button class="btn btn-primary" onclick="openForm(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
       '</div>' +
       '<div style="overflow-x:auto"><table class="tbl" id="tbl-'+u+'">' +
-        '<thead><tr><th>N°</th><th>Proyecto</th><th>Constructora</th><th>Registrado por</th><th>Av. Físico</th><th>Av. Financiero</th><th>Fecha Fin</th><th>Estado</th><th>Acciones</th></tr></thead>' +
+        '<thead><tr><th>N°</th><th>Proyecto</th><th>Constructora</th><th>Registrado por</th><th>Av. Físico</th><th>Av. Financiero</th><th>N° Contrato</th><th>Estado</th><th>Acciones</th></tr></thead>' +
         '<tbody id="tbody-'+u+'">'+rows+'</tbody>' +
       '</table></div>' +
     '</div>';
 }
 
 function filterTable(q, u) {
-  document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r) {
-    r.style.display = r.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+  var qL = q.toLowerCase().trim();
+  var plist = DB[u] || [];
+  document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r, i) {
+    if (!qL) { r.style.display = ''; return; }
+    var p = plist[i];
+    if (!p) { r.style.display = 'none'; return; }
+    // Busca en: N° Proceso, N° Contrato, Nombre del Proyecto, Constructora, Supervisora
+    var fields = [
+      p.nProceso    || '',
+      p.noContrato  || '',
+      p.proyecto    || '',
+      p.constructora|| '',
+      p.supervisora || ''
+    ];
+    r.style.display = fields.some(function(f){ return f.toLowerCase().includes(qL); }) ? '' : 'none';
   });
 }
 function filterEstado(e, u) {
@@ -2181,6 +2200,183 @@ async function cambiarPasswordUsuario(id, username) {
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') { closeModal(); closeDetail(); closeNav(); }
 });
+
+
+// ═══════════════════════════════════════════════════════════
+//  REPORTE GENERAL — genera y descarga HTML con gráficas
+// ═══════════════════════════════════════════════════════════
+function generarReporte() {
+  var fecha = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
+  var allP  = Object.values(DB).flat();
+  var total = allP.length;
+  var ejec  = allP.filter(function(p){return p.estado==='En Ejecución';}).length;
+  var proc  = allP.filter(function(p){return p.estado==='En Proceso / Contratación';}).length;
+  var susp  = allP.filter(function(p){return p.estado==='Suspendido';}).length;
+  var term  = allP.filter(function(p){return p.estado==='Terminado';}).length;
+  var avgFis= total ? (allP.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/total).toFixed(1) : 0;
+  var totalMonto   = allP.reduce(function(a,p){return a+(parseFloat(p.montoContratoInicial)||0);},0);
+  var totalDeveng  = allP.reduce(function(a,p){return a+(parseFloat(p.totalDevengado)||0);},0);
+  var avgFin = totalMonto>0 ? (totalDeveng/totalMonto*100).toFixed(1) : 0;
+
+  // Per-unit data
+  var unitData = Object.entries(UNIDADES).map(function(e){
+    var k=e[0]; var u=e[1];
+    var pl = DB[k]||[];
+    var af  = pl.length ? (pl.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/pl.length).toFixed(1) : 0;
+    var mon = pl.reduce(function(a,p){return a+(parseFloat(p.montoContratoInicial)||0);},0);
+    var dev = pl.reduce(function(a,p){return a+(parseFloat(p.totalDevengado)||0);},0);
+    var afin= mon>0?(dev/mon*100).toFixed(1):0;
+    var eN  = pl.filter(function(p){return p.estado==='En Ejecución';}).length;
+    var sN  = pl.filter(function(p){return p.estado==='Suspendido';}).length;
+    var tN  = pl.filter(function(p){return p.estado==='Terminado';}).length;
+    return {key:k,nombre:u.nombre,color:u.color,total:pl.length,af:af,afin:afin,
+            monto:mon,devengado:dev,ejec:eN,susp:sN,term:tN};
+  });
+
+  function fmtL(n){return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2});}
+
+  // Build chart bars for each unit
+  var chartBars = unitData.map(function(u){
+    return '<div style="flex:1;text-align:center;">'
+      +'<div style="display:flex;gap:3px;align-items:flex-end;justify-content:center;height:120px;">'
+      +'<div style="width:18px;background:#1268C4;border-radius:3px 3px 0 0;height:'+Math.max(u.af,1)+'%;transition:.5s;" title="Físico '+u.af+'%"></div>'
+      +'<div style="width:18px;background:#0D7A4E;border-radius:3px 3px 0 0;height:'+Math.max(u.afin,1)+'%;transition:.5s;" title="Financiero '+u.afin+'%"></div>'
+      +'</div>'
+      +'<div style="font-size:10px;color:#666;margin-top:6px;line-height:1.3;">'+u.nombre.split(' ').slice(0,3).join('<br>')+'</div>'
+      +'<div style="font-size:10px;font-weight:600;color:#1268C4;margin-top:3px;">'+u.af+'% / '+u.afin+'%</div>'
+      +'</div>';
+  }).join('');
+
+  // Estado pie visual (simple bar)
+  var estadoRows = [
+    {label:'En Ejecución',val:ejec,color:'#0D7A4E'},
+    {label:'En Proceso',val:proc,color:'#1268C4'},
+    {label:'Suspendido',val:susp,color:'#B8620A'},
+    {label:'Terminado',val:term,color:'#7B8FA0'},
+  ].map(function(e){
+    var pct = total>0?(e.val/total*100).toFixed(1):0;
+    return '<tr><td style="padding:5px 8px;font-size:12px;">'+e.label+'</td>'
+      +'<td style="padding:5px 8px;"><div style="height:14px;background:#eee;border-radius:3px;overflow:hidden;width:200px;">'
+      +'<div style="height:100%;width:'+pct+'%;background:'+e.color+';border-radius:3px;"></div></div></td>'
+      +'<td style="padding:5px 12px;font-size:12px;font-weight:600;">'+e.val+'</td>'
+      +'<td style="padding:5px 8px;font-size:11px;color:#666;">'+pct+'%</td>'
+      +'</tr>';
+  }).join('');
+
+  // Unit summary table rows
+  var unitRows = unitData.map(function(u){
+    return '<tr>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:500;color:'+u.color+';">'+u.nombre+'</td>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.total+'</td>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.ejec+'</td>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.susp+'</td>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.term+'</td>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'
+        +'<div style="display:flex;align-items:center;gap:6px;">'
+        +'<div style="flex:1;height:8px;background:#eee;border-radius:4px;overflow:hidden;">'
+        +'<div style="height:100%;width:'+u.af+'%;background:#1268C4;border-radius:4px;"></div></div>'
+        +'<span style="font-size:11px;font-weight:600;color:#1268C4;width:36px;">'+u.af+'%</span></div></td>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'
+        +'<div style="display:flex;align-items:center;gap:6px;">'
+        +'<div style="flex:1;height:8px;background:#eee;border-radius:4px;overflow:hidden;">'
+        +'<div style="height:100%;width:'+u.afin+'%;background:#0D7A4E;border-radius:4px;"></div></div>'
+        +'<span style="font-size:11px;font-weight:600;color:#0D7A4E;width:36px;">'+u.afin+'%</span></div></td>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(u.monto)+'</td>'
+      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(u.devengado)+'</td>'
+      +'</tr>';
+  }).join('');
+
+  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>'
+    +'<title>Reporte DGCV — '+fecha+'</title>'
+    +'<style>'
+    +'*{box-sizing:border-box;margin:0;padding:0;}'
+    +'body{font-family:"Segoe UI",Arial,sans-serif;background:#f5f7fa;color:#1C2B3A;font-size:13px;}'
+    +'.page{max-width:1100px;margin:0 auto;padding:24px;}'
+    +'.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:28px 32px;border-radius:10px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #D4A820;}'
+    +'.header h1{font-size:20px;font-weight:700;letter-spacing:.3px;}'
+    +'.header p{font-size:11px;opacity:.7;margin-top:4px;}'
+    +'.header .fecha{text-align:right;font-size:11px;opacity:.7;}'
+    +'.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px;}'
+    +'.kpi{background:#fff;border-radius:8px;padding:16px;border:1px solid #D0DCE6;border-top:3px solid #1268C4;}'
+    +'.kpi.g{border-top-color:#0D7A4E;}.kpi.a{border-top-color:#D4A820;}.kpi.r{border-top-color:#C0392B;}.kpi.gr{border-top-color:#7B8FA0;}'
+    +'.kpi-num{font-size:28px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'
+    +'.kpi-lbl{font-size:11px;color:#7B8FA0;margin-top:5px;font-weight:500;}'
+    +'.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:20px;overflow:hidden;}'
+    +'.section-title{background:#f8f9fb;padding:12px 18px;font-size:12px;font-weight:600;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;}'
+    +'.section-title::before{content:"";display:inline-block;width:3px;height:16px;background:#D4A820;border-radius:2px;}'
+    +'.section-body{padding:18px;}'
+    +'.chart-container{display:flex;gap:8px;align-items:flex-end;padding:10px 0;}'
+    +'.legend{display:flex;gap:16px;margin-top:12px;justify-content:center;}'
+    +'.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#666;}'
+    +'.legend-dot{width:10px;height:10px;border-radius:2px;}'
+    +'table{width:100%;border-collapse:collapse;}'
+    +'th{background:#f0f4f8;padding:9px 12px;text-align:left;font-size:10px;font-weight:600;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;}'
+    +'.footer{text-align:center;font-size:10px;color:#aaa;margin-top:24px;padding:12px;border-top:1px solid #eee;}'
+    +'@media print{body{background:#fff;}.page{padding:12px;}}'
+    +'</style></head><body><div class="page">'
+
+    // Header
+    +'<div class="header">'
+    +'<div><h1>Reporte General de Avance — DGCV</h1><p>Dirección General de Construcción Vial · Secretaría de Infraestructura y Transporte</p></div>'
+    +'<div class="fecha">Generado el<br><strong>'+fecha+'</strong></div>'
+    +'</div>'
+
+    // KPIs
+    +'<div class="kpi-grid">'
+    +'<div class="kpi"><div class="kpi-num">'+total+'</div><div class="kpi-lbl">Total Proyectos</div></div>'
+    +'<div class="kpi g"><div class="kpi-num">'+ejec+'</div><div class="kpi-lbl">En Ejecución</div></div>'
+    +'<div class="kpi a"><div class="kpi-num">'+avgFis+'%</div><div class="kpi-lbl">Avance Físico Prom.</div></div>'
+    +'<div class="kpi g"><div class="kpi-num">'+avgFin+'%</div><div class="kpi-lbl">Avance Financiero Prom.</div></div>'
+    +'<div class="kpi r"><div class="kpi-num">'+susp+'</div><div class="kpi-lbl">Suspendidos</div></div>'
+    +'</div>'
+
+    // Gráfica avance por unidad
+    +'<div class="section"><div class="section-title">Avance por Unidad</div><div class="section-body">'
+    +'<div class="chart-container">'+chartBars+'</div>'
+    +'<div class="legend"><div class="legend-item"><div class="legend-dot" style="background:#1268C4"></div>Avance Físico</div>'
+    +'<div class="legend-item"><div class="legend-dot" style="background:#0D7A4E"></div>Avance Financiero</div></div>'
+    +'</div></div>'
+
+    // Estado de proyectos
+    +'<div class="section"><div class="section-title">Distribución por Estado</div><div class="section-body">'
+    +'<table><thead><tr><th>Estado</th><th>Distribución</th><th>Cantidad</th><th>Porcentaje</th></tr></thead>'
+    +'<tbody>'+estadoRows+'</tbody></table>'
+    +'</div></div>'
+
+    // Resumen por unidad
+    +'<div class="section"><div class="section-title">Resumen por Unidad</div><div class="section-body">'
+    +'<table><thead><tr>'
+    +'<th>Unidad</th><th>Proyectos</th><th>En Ejec.</th><th>Susp.</th><th>Term.</th>'
+    +'<th>Av. Físico</th><th>Av. Financiero</th><th>Monto Contrato</th><th>Total Devengado</th>'
+    +'</tr></thead><tbody>'+unitRows+'</tbody></table>'
+    +'</div></div>'
+
+    // Monto total
+    +'<div class="section"><div class="section-title">Resumen Financiero General</div><div class="section-body">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">'
+    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
+    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Monto Total de Contratos</div>'
+    +'<div style="font-size:18px;font-weight:600;color:#001233;font-family:monospace;">L '+fmtL(totalMonto)+'</div></div>'
+    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
+    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Total Devengado</div>'
+    +'<div style="font-size:18px;font-weight:600;color:#0D7A4E;font-family:monospace;">L '+fmtL(totalDeveng)+'</div></div>'
+    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
+    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Saldo Pendiente</div>'
+    +'<div style="font-size:18px;font-weight:600;color:#C0392B;font-family:monospace;">L '+fmtL(totalMonto-totalDeveng)+'</div></div>'
+    +'</div></div></div>'
+
+    +'<div class="footer">Reporte generado por el Sistema de Seguimiento DGCV · '+fecha+' · Secretaría de Infraestructura y Transporte · República de Honduras</div>'
+    +'</div></body></html>';
+
+  // Download
+  var blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  var a    = document.createElement('a');
+  a.href   = URL.createObjectURL(blob);
+  a.download = 'Reporte_DGCV_'+new Date().toISOString().slice(0,10)+'.html';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('Reporte descargado correctamente.', 'ok');
+}
 
 // ═══════════════════════════════════════════════════════════
 //  MÓVIL — NAVEGACIÓN DRAWER
