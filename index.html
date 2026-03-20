@@ -727,6 +727,10 @@ input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3
     <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/><path d="M1 14c0-3 2-5 5-5s5 2 5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M11 7l2 2 3-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <span>Gestión de Usuarios</span>
   </div>
+  <div class="nav-item" onclick="showView('empresas',this)" id="nav-empresas" style="display:none;">
+    <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="4" width="14" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1" stroke="currentColor" stroke-width="1.2"/><line x1="1" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="1" stroke-dasharray="2 1"/><circle cx="8" cy="11" r="1.5" stroke="currentColor" stroke-width="1.1"/></svg>
+    <span>Gestión de Empresas</span>
+  </div>
 
   <div class="sidenav-bottom">
     <div class="logout-btn" onclick="doLogout()">
@@ -1203,8 +1207,10 @@ async function doLogin() {
     // Item de gestion de usuarios — solo visible para admins
     var navUsuarios        = document.getElementById('nav-usuarios');
     var navUsuariosSection = document.getElementById('nav-usuarios-section');
+    var navEmpresas        = document.getElementById('nav-empresas');
     if (navUsuarios)        navUsuarios.style.display        = currentUser.esGlobalAdmin ? 'flex' : 'none';
     if (navUsuariosSection) navUsuariosSection.style.display = currentUser.esGlobalAdmin ? 'block' : 'none';
+    if (navEmpresas)        navEmpresas.style.display        = currentUser.esGlobalAdmin ? 'flex' : 'none';
     var reportBtn = document.getElementById('reportBtn');
     if (reportBtn) reportBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
 
@@ -1246,8 +1252,10 @@ function doLogout() {
   document.querySelectorAll('.nav-item').forEach(function(el) { el.style.display = ''; });
   var navUsuarios = document.getElementById('nav-usuarios');
   var navUsuariosSection = document.getElementById('nav-usuarios-section');
+  var navEmpresasL = document.getElementById('nav-empresas');
   if (navUsuarios) navUsuarios.style.display = 'none';
   if (navUsuariosSection) navUsuariosSection.style.display = 'none';
+  if (navEmpresasL) navEmpresasL.style.display = 'none';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1259,6 +1267,7 @@ function showView(view, el) {
   if (el) el.classList.add('active');
   if (view === 'dashboard') renderDashboard();
   else if (view === 'usuarios') renderUsuariosPanel();
+  else if (view === 'empresas') renderEmpresasPanel();
   else renderUnidad(view);
   if (isMobile && isMobile()) closeNav();
 }
@@ -1662,7 +1671,7 @@ function openForm(u, idx) {
       '<div class="form-group"><label>Fecha de Adjudicación <span class="req">*</span></label><input type="date" id="f_fechaAdjudicacion" value="'+fv('fechaAdjudicacion')+'"/></div>' +
       '<div class="form-group"><label>Fecha de Firma del Contrato</label><input type="date" id="f_fechaContrato" value="'+fv('fechaContrato')+'"/></div>' +
       '<div class="form-group"><label>Plazo (días calendario)</label><input type="number" id="f_plazo" value="'+fv('plazo')+'" min="1" placeholder="365" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
-      '<div class="form-group"><label>Fecha de Inicio de Obras <span class="req">*</span></label><input type="date" id="f_fechaInicio" value="'+fv('fechaInicio')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Inicio de Obras</label><input type="date" id="f_fechaInicio" value="'+fv('fechaInicio')+'"/></div>' +
       '<div class="form-group"><label>Fecha de Finalización Programada</label><input type="date" id="f_fechaFinObra" value="'+fv('fechaFinObra')+'"/></div>' +
     '</div>' +
   '</div>' +
@@ -1707,7 +1716,7 @@ function openForm(u, idx) {
   '<div class="form-section">' +
     '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera y Avances</div>' +
     '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Monto Contrato Inicial (L) <span class="req">*</span></label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
       '<div class="form-group"><label>Monto Modificación / Adenda (L)</label><input type="number" id="f_montoModificacion" value="'+fv('montoModificacion')+'" step="0.01" min="0" placeholder="Solo si aplica" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
     '</div>' +
     '<div class="form-grid g1" style="margin-top:10px">' +
@@ -1816,7 +1825,7 @@ function addPago(data) {
     '<div class="pago-num">Pago N° '+n+'</div>' +
     '<button class="pago-remove" onclick="document.getElementById(\'pago-'+n+'\').remove();recalcPagos()">✕</button>' +
     '<div class="form-grid g2" style="margin-bottom:8px">' +
-      '<div class="form-group"><label>Monto del Pago (L) <span class="req">*</span></label><input type="number" class="pago-monto" value="'+(data.monto||'')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Monto del Pago (L)</label><input type="number" class="pago-monto" value="'+(data.monto||'')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
       '<div class="form-group"><label>Fecha de Ingreso / Registro</label><input type="date" class="pago-fechaIngreso" value="'+(data.fechaIngreso||data.fecha||'')+'"/></div>' +
     '</div>' +
     '<div class="form-grid g3">' +
@@ -2248,8 +2257,204 @@ async function cambiarPasswordUsuario(id, username) {
 
 
 // ═══════════════════════════════════════════════════════════
-//  MUNICIPIOS — actualiza select según departamento
+//  GESTIÓN DE EMPRESAS (solo admin global)
 // ═══════════════════════════════════════════════════════════
+function renderEmpresasPanel() {
+  if (!currentUser || !currentUser.esGlobalAdmin) {
+    document.getElementById('mainContent').innerHTML = '<div class="empty-state"><p>Acceso restringido.</p></div>';
+    return;
+  }
+  var mc = document.getElementById('mainContent');
+  mc.innerHTML =
+    '<div class="page-header">' +
+      '<h2>Gestión de Empresas Precalificadas</h2>' +
+      '<p>Administre el catálogo de empresas constructoras y supervisoras.</p>' +
+      '<div class="page-actions">' +
+        '<button class="btn btn-primary" onclick="abrirModalEmpresa()">+ Nueva Empresa</button>' +
+        '<button class="btn btn-outline" onclick="cargarEmpresas().then(cargarTablaEmpresas)">↺ Actualizar</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="table-wrap">' +
+      '<div class="table-toolbar">' +
+        '<h3>Empresas registradas</h3>' +
+        '<div class="search-box"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="var(--gris3)" stroke-width="1.2"/><path d="M8 8l2.5 2.5" stroke="var(--gris3)" stroke-width="1.2" stroke-linecap="round"/></svg>' +
+        '<input type="text" placeholder="Buscar empresa..." oninput="filtrarTablaEmpresas(this.value)"/></div>' +
+        '<select class="filter-select" id="filtroTipoEmp" onchange="filtrarTablaEmpresas()">' +
+          '<option value="">Todos los tipos</option>' +
+          '<option value="constructora">Constructoras</option>' +
+          '<option value="supervisora">Supervisoras</option>' +
+          '<option value="ambas">Ambas</option>' +
+        '</select>' +
+      '</div>' +
+      '<div id="tablaEmpresas"><div class="empty-state"><p>Cargando...</p></div></div>' +
+    '</div>';
+  cargarTablaEmpresas();
+}
+
+var _todasEmpresas = [];
+
+async function cargarTablaEmpresas() {
+  try {
+    var rows = await supaGet('empresas', 'select=*&order=tipo.asc,nombre.asc');
+    _todasEmpresas = rows || [];
+    renderTablaEmpresas(_todasEmpresas);
+  } catch(e) {
+    var el = document.getElementById('tablaEmpresas');
+    if (el) el.innerHTML = '<div class="empty-state"><p>Error al cargar: ' + e.message + '</p></div>';
+  }
+}
+
+function renderTablaEmpresas(rows) {
+  var el = document.getElementById('tablaEmpresas');
+  if (!el) return;
+  if (!rows || !rows.length) {
+    el.innerHTML = '<div class="empty-state"><p>No hay empresas registradas.</p></div>';
+    return;
+  }
+  var tipoPill = {
+    constructora: '<span class="pill proc">Constructora</span>',
+    supervisora:  '<span class="pill ejec">Supervisora</span>',
+    ambas:        '<span class="pill" style="background:var(--gold6);color:var(--gold1);">Ambas</span>'
+  };
+  var tbody = rows.map(function(e) {
+    var estado = e.activa
+      ? '<span class="pill ejec">Activa</span>'
+      : '<span class="pill susp">Inactiva</span>';
+    return '<tr>' +
+      '<td style="font-weight:500;font-size:12px;">' + e.nombre + '</td>' +
+      '<td>' + (tipoPill[e.tipo] || e.tipo) + '</td>' +
+      '<td style="font-size:11px;color:var(--gris2);">' + (e.rtn || '—') + '</td>' +
+      '<td style="font-size:11px;color:var(--gris2);">' + (e.representante || '—') + '</td>' +
+      '<td style="font-size:11px;color:var(--gris2);">' + (e.telefono || '—') + '</td>' +
+      '<td>' + estado + '</td>' +
+      '<td><div class="tbl-actions">' +
+        '<button class="tbl-btn edit" onclick="abrirModalEmpresa(\'' + e.id + '\')">Editar</button>' +
+        '<button class="tbl-btn" onclick="toggleEmpresaActiva(\'' + e.id + '\',' + !e.activa + ')">' + (e.activa ? 'Desactivar' : 'Activar') + '</button>' +
+        '<button class="tbl-btn" style="color:var(--rojo)" onclick="eliminarEmpresa(\'' + e.id + '\',\'' + e.nombre.replace(/'/g,"\\'") + '\')">✕</button>' +
+      '</div></td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<table class="tbl"><thead><tr>' +
+      '<th>Nombre / Razón Social</th><th>Tipo</th><th>RTN</th><th>Representante</th><th>Teléfono</th><th>Estado</th><th>Acciones</th>' +
+    '</tr></thead><tbody>' + tbody + '</tbody></table>';
+}
+
+function filtrarTablaEmpresas(q) {
+  var query = typeof q === 'string' ? q.toLowerCase() : (document.querySelector('#tablaEmpresas')&&''||'');
+  var tipo  = (document.getElementById('filtroTipoEmp')||{}).value || '';
+  var filtrado = _todasEmpresas.filter(function(e) {
+    var matchQ = !query || (e.nombre||'').toLowerCase().includes(query) ||
+                 (e.rtn||'').toLowerCase().includes(query) ||
+                 (e.representante||'').toLowerCase().includes(query);
+    var matchT = !tipo || e.tipo === tipo;
+    return matchQ && matchT;
+  });
+  renderTablaEmpresas(filtrado);
+}
+
+function abrirModalEmpresa(id) {
+  var esEdicion = !!id;
+  document.getElementById('modalTitle').textContent = esEdicion ? 'Editar Empresa' : 'Nueva Empresa';
+  document.getElementById('modalBody').innerHTML =
+    '<div class="form-section">' +
+      '<div class="form-grid g2">' +
+        '<div class="form-group span2"><label>Nombre / Razón Social <span class="req">*</span></label>' +
+          '<input type="text" id="emp_nombre" placeholder="Nombre completo de la empresa"/></div>' +
+        '<div class="form-group"><label>Tipo <span class="req">*</span></label>' +
+          '<select id="emp_tipo">' +
+            '<option value="constructora">Constructora</option>' +
+            '<option value="supervisora">Supervisora</option>' +
+            '<option value="ambas">Ambas (Constructora y Supervisora)</option>' +
+          '</select></div>' +
+        '<div class="form-group"><label>RTN</label>' +
+          '<input type="text" id="emp_rtn" placeholder="14 dígitos" maxlength="14" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+        '<div class="form-group"><label>Representante Legal</label>' +
+          '<input type="text" id="emp_representante" placeholder="Nombre completo"/></div>' +
+        '<div class="form-group"><label>Teléfono</label>' +
+          '<input type="text" id="emp_telefono" placeholder="(504) 0000-0000"/></div>' +
+        '<div class="form-group"><label>Correo Electrónico</label>' +
+          '<input type="email" id="emp_correo" placeholder="empresa@ejemplo.com"/></div>' +
+      '</div>' +
+    '</div>';
+
+  document.getElementById('modalOverlay').classList.add('open');
+  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+  btnGuardar.onclick = function() { guardarEmpresa(id); };
+
+  if (esEdicion) {
+    var emp = _todasEmpresas.find(function(e){ return e.id === id; });
+    if (emp) {
+      document.getElementById('emp_nombre').value        = emp.nombre        || '';
+      document.getElementById('emp_tipo').value          = emp.tipo          || 'constructora';
+      document.getElementById('emp_rtn').value           = emp.rtn           || '';
+      document.getElementById('emp_representante').value = emp.representante || '';
+      document.getElementById('emp_telefono').value      = emp.telefono      || '';
+      document.getElementById('emp_correo').value        = emp.correo        || '';
+    }
+  }
+}
+
+async function guardarEmpresa(id) {
+  var nombre = (document.getElementById('emp_nombre').value || '').trim();
+  var tipo   = document.getElementById('emp_tipo').value;
+  if (!nombre) { showToast('El nombre de la empresa es obligatorio.', 'err'); return; }
+
+  var row = {
+    nombre:        nombre,
+    tipo:          tipo,
+    rtn:           (document.getElementById('emp_rtn').value || '').trim() || null,
+    representante: (document.getElementById('emp_representante').value || '').trim() || null,
+    telefono:      (document.getElementById('emp_telefono').value || '').trim() || null,
+    correo:        (document.getElementById('emp_correo').value || '').trim() || null,
+  };
+
+  try {
+    if (id) {
+      await supaPatch('empresas', id, row);
+      showToast('Empresa actualizada correctamente.', 'ok');
+    } else {
+      row.id = genUUID();
+      row.activa = true;
+      await supaPost('empresas', row);
+      showToast('Empresa registrada. Ya disponible en los formularios.', 'ok');
+    }
+    closeModal();
+    document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
+    await cargarEmpresas();
+    cargarTablaEmpresas();
+  } catch(e) {
+    showToast('Error al guardar: ' + e.message, 'err');
+  }
+}
+
+async function toggleEmpresaActiva(id, nuevoEstado) {
+  var accion = nuevoEstado ? 'activar' : 'desactivar';
+  if (!confirm('¿Confirma ' + accion + ' esta empresa?')) return;
+  try {
+    await supaPatch('empresas', id, { activa: nuevoEstado });
+    showToast('Empresa ' + (nuevoEstado ? 'activada' : 'desactivada') + '.', 'ok');
+    await cargarEmpresas();
+    cargarTablaEmpresas();
+  } catch(e) {
+    showToast('Error: ' + e.message, 'err');
+  }
+}
+
+async function eliminarEmpresa(id, nombre) {
+  if (!confirm('¿Eliminar permanentemente "' + nombre + '"?\nEsta acción no se puede deshacer.')) return;
+  try {
+    await supaDelete('empresas', id);
+    showToast('Empresa eliminada.', 'ok');
+    await cargarEmpresas();
+    cargarTablaEmpresas();
+  } catch(e) {
+    showToast('Error: ' + e.message, 'err');
+  }
+}
+
+
 function actualizarMunicipios(valorActual) {
   var dep = document.getElementById('f_departamento');
   var mun = document.getElementById('f_municipio');
