@@ -1349,18 +1349,38 @@ function renderDashboard() {
   var avgF  = total ? Math.round(allP.reduce(function(a,p){ return a + (parseFloat(p.avanceFisico)||0); }, 0) / total) : 0;
   var avgFin= total ? Math.round(allP.reduce(function(a,p){ return a + calcAvFin(p); }, 0) / total) : 0;
 
-  var chartBars = Object.entries(UNIDADES).map(function(entry) {
+  // ── Gráficos de dona por unidad (físico = anillo exterior, financiero = interior)
+  function dashPie(pct, color, r, cx, cy) {
+    var p = Math.min(Math.max(parseFloat(pct)||0, 0), 100);
+    var circ = 2 * Math.PI * r;
+    var dash = (p / 100) * circ;
+    return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#E8EFF4" stroke-width="12"/>'
+      + '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+color+'" stroke-width="12"'
+      + ' stroke-dasharray="'+dash.toFixed(1)+' '+(circ-dash).toFixed(1)+'"'
+      + ' stroke-linecap="butt" transform="rotate(-90 '+cx+' '+cy+')"/>';
+  }
+
+  var chartPies = Object.entries(UNIDADES).map(function(entry) {
     var k = entry[0]; var u = entry[1];
-    var pl = DB[k] || [];
+    var pl   = DB[k] || [];
     var af   = pl.length ? Math.round(pl.reduce(function(a,p){ return a+(parseFloat(p.avanceFisico)||0); },0)/pl.length) : 0;
     var afin = pl.length ? Math.round(pl.reduce(function(a,p){ return a+calcAvFin(p); },0)/pl.length) : 0;
-    return '<div class="chart-bar-group">' +
-      '<div style="display:flex;gap:2px;align-items:flex-end;height:90px;">' +
-        '<div class="chart-bar" style="flex:1;height:'+Math.max(af,2)+'%;background:var(--az3);" title="Físico: '+af+'%"></div>' +
-        '<div class="chart-bar" style="flex:1;height:'+Math.max(afin,2)+'%;background:var(--verde);" title="Financiero: '+afin+'%"></div>' +
-      '</div>' +
-      '<div class="chart-bar-lbl" style="font-size:8px">' + u.nombre.split(' ').slice(0,2).join(' ') + '</div>' +
-    '</div>';
+    var shortName = u.nombre
+      .replace('Red Vial No Pavimentada','RV No Pavim.')
+      .replace('Red Vial Pavimentada','RV Pavimentada')
+      .replace('Respuesta Rápida a Emergencias','Resp. Rápida')
+      .replace('Fondos Externos/Nacionales','Fondos Ext/Nac')
+      .replace('Limpieza de Derecho de Vía','Limp. D. de Vía');
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0;">'
+      + '<svg width="100" height="100" viewBox="0 0 100 100">'
+      + dashPie(af,   'var(--az3)', 38, 50, 50)
+      + dashPie(afin, 'var(--verde)', 22, 50, 50)
+      + '<text x="50" y="46" text-anchor="middle" font-size="11" font-weight="700" fill="var(--az2)" font-family="monospace">'+af+'%</text>'
+      + '<text x="50" y="60" text-anchor="middle" font-size="9" fill="var(--verde)" font-family="monospace">'+afin+'%</text>'
+      + '</svg>'
+      + '<div style="font-size:9px;color:var(--gris2);font-weight:600;text-align:center;line-height:1.3;padding:0 4px;">'+shortName+'</div>'
+      + '<div style="font-size:9px;color:var(--gris3);">'+pl.length+' proy.</div>'
+      + '</div>';
   }).join('');
 
   var ucards = Object.entries(UNIDADES).map(function(entry) {
@@ -1395,7 +1415,7 @@ function renderDashboard() {
       '<div class="kpi-card az"><div class="kpi-num">'+avgFin+'%</div><div class="kpi-lbl">Avance Financiero Prom.</div></div>' +
       '<div class="kpi-card '+(susp>0?'rojo':'gris')+'"><div class="kpi-num">'+susp+'</div><div class="kpi-lbl">Suspendidos</div></div>' +
     '</div>' +
-    '<div class="chart-wrap"><div class="chart-title"><span>Avance por Unidad</span><div class="chart-legend"><div class="chart-legend-item"><div class="chart-legend-dot" style="background:var(--az3)"></div>Físico</div><div class="chart-legend-item"><div class="chart-legend-dot" style="background:var(--verde)"></div>Financiero</div></div></div><div class="chart-bars">'+chartBars+'</div></div>' +
+    '<div class="chart-wrap"><div class="chart-title"><span>Avance por Unidad</span><div class="chart-legend"><div class="chart-legend-item"><div class="chart-legend-dot" style="background:var(--az3)"></div>Físico</div><div class="chart-legend-item"><div class="chart-legend-dot" style="background:var(--verde)"></div>Financiero</div></div></div><div style="display:flex;align-items:flex-end;gap:8px;padding:8px 0 4px;">'+chartPies+'</div></div>' +
     '<div style="font-size:12px;font-weight:600;color:var(--gris2);margin-bottom:10px;">Módulos por Unidad</div>' +
     '<div class="unidades-grid">'+ucards+'</div>';
 }
