@@ -1307,7 +1307,7 @@ async function doLogin() {
       // Coordinadores/admins de unidad: solo ven su unidad
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
         var v = el.id.replace('nav-', '');
-        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios') el.style.display = 'none';
+        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos') el.style.display = 'none';
       });
     }
     // esGlobalAdmin: no oculta nada
