@@ -256,6 +256,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--az4);box-shadow:0 0 0
 textarea{resize:vertical;min-height:60px;}
 select{cursor:pointer;}
 .form-hint{font-size:10px;color:var(--gris3);margin-top:2px;}
+/* Datalist input — empresa precalificada */
+input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237B8FA0' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;}
 .input-group{display:flex;}
 .input-group input{flex:1;border-radius:5px 0 0 5px;}
 .input-group .ig-addon{
@@ -949,6 +951,7 @@ var DEPTOS  = ['Atlántida','Choluteca','Colón','Comayagua','Copán','Cortés',
 //  ESTADO DE LA APLICACIÓN
 // ═══════════════════════════════════════════════════════════
 var DB          = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
+var EMPRESAS    = { constructoras:[], supervisoras:[] }; // cache de empresas precalificadas
 var currentUser = null;
 var currentView = 'dashboard';
 var editingId   = null;
@@ -1065,6 +1068,30 @@ function persistirProyecto(unidad, proj) {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  EMPRESAS PRECALIFICADAS
+// ═══════════════════════════════════════════════════════════
+function cargarEmpresas() {
+  return supaGet('empresas', 'select=id,nombre,tipo,activa&activa=eq.true&order=nombre.asc')
+    .then(function(rows) {
+      EMPRESAS.constructoras = (rows||[]).filter(function(e){ return e.tipo==='constructora'||e.tipo==='ambas'; });
+      EMPRESAS.supervisoras  = (rows||[]).filter(function(e){ return e.tipo==='supervisora' ||e.tipo==='ambas'; });
+    })
+    .catch(function(e) {
+      console.warn('No se pudieron cargar empresas:', e.message);
+    });
+}
+
+// Renders a datalist-backed input with autocomplete from empresas
+function empresaInput(id, tipo, valor) {
+  var listId = 'dl-'+id;
+  var lista = tipo==='supervisora' ? EMPRESAS.supervisoras : EMPRESAS.constructoras;
+  var opts  = lista.map(function(e){ return '<option value="'+e.nombre.replace(/"/g,'&quot;')+'">'; }).join('');
+  return '<input type="text" id="'+id+'" value="'+valor+'" list="'+listId+'" placeholder="Escriba o seleccione..." autocomplete="off"/>'
+    +'<datalist id="'+listId+'">'+opts+'</datalist>';
+}
+
 // ═══════════════════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════════════════
@@ -1119,6 +1146,7 @@ async function doLogin() {
     // Login exitoso — cargar proyectos
     btn.textContent = 'Cargando datos...';
     await cargarProyectos();
+    await cargarEmpresas();
 
     var efectiveUnidad = u.unidad === 'admin' ? unidad : u.unidad;
     var esGlobalAdmin   = (u.unidad === 'admin' && u.rol === 'admin');   // Admin General → todo
@@ -1577,7 +1605,7 @@ function openForm(u, idx) {
   '<div class="form-section">' +
     '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="5" width="11" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5V3a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.2"/></svg>Empresa Constructora</div>' +
     '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Empresa Constructora <span class="req">*</span></label><input type="text" id="f_constructora" value="'+fv('constructora')+'" placeholder="Razón social"/></div>' +
+      '<div class="form-group"><label>Empresa Constructora <span class="req">*</span></label>'+empresaInput('f_constructora','constructora',fv('constructora'))+'</div>' +
       '<div class="form-group"><label>N° de Contrato</label><input type="text" id="f_noContrato" value="'+fv('noContrato')+'"/></div>' +
       '<div class="form-group"><label>Nombre del Coordinador <span class="req">*</span></label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>' +
       '<div class="form-group"><label>Supervisor de Campo <span class="req">*</span></label><input type="text" id="f_supervisor" value="'+fv('supervisor')+'"/></div>' +
@@ -1598,7 +1626,7 @@ function openForm(u, idx) {
     '</div>' +
     '<div id="sup-ext-fields">' +
       '<div class="form-grid g3">' +
-        '<div class="form-group"><label>Empresa Supervisora</label><input type="text" id="f_supervisora" value="'+fv('supervisora')+'"/></div>' +
+        '<div class="form-group"><label>Empresa Supervisora</label>'+empresaInput('f_supervisora','supervisora',fv('supervisora'))+'</div>' +
         '<div class="form-group"><label>N° Contrato Supervisora</label><input type="text" id="f_noContratoSup" value="'+fv('noContratoSup')+'"/></div>' +
         '<div class="form-group"><label>Contratos que Supervisa</label><input type="text" id="f_contratosSupervisa" value="'+fv('contratosSupervisa')+'"/></div>' +
       '</div>' +
@@ -2214,7 +2242,7 @@ function generarReporte() {
   var susp  = allP.filter(function(p){return p.estado==='Suspendido';}).length;
   var term  = allP.filter(function(p){return p.estado==='Terminado';}).length;
   var avgFis= total ? (allP.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/total).toFixed(1) : 0;
-  var totalMonto   = allP.reduce(function(a,p){return a+(parseFloat(p.montoContratoInicial)||0);},0);
+  var totalMonto   = allP.reduce(function(a,p){var mI=parseFloat(p.montoContratoInicial)||0;var mM=parseFloat(p.montoModificacion)||0;return a+(mM>0?mM:mI);},0);
   var totalDeveng  = allP.reduce(function(a,p){return a+(parseFloat(p.totalDevengado)||0);},0);
   var avgFin = totalMonto>0 ? (totalDeveng/totalMonto*100).toFixed(1) : 0;
 
@@ -2223,7 +2251,7 @@ function generarReporte() {
     var k=e[0]; var u=e[1];
     var pl = DB[k]||[];
     var af  = pl.length ? (pl.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/pl.length).toFixed(1) : 0;
-    var mon = pl.reduce(function(a,p){return a+(parseFloat(p.montoContratoInicial)||0);},0);
+    var mon = pl.reduce(function(a,p){var mI=parseFloat(p.montoContratoInicial)||0;var mM=parseFloat(p.montoModificacion)||0;return a+(mM>0?mM:mI);},0);
     var dev = pl.reduce(function(a,p){return a+(parseFloat(p.totalDevengado)||0);},0);
     var afin= mon>0?(dev/mon*100).toFixed(1):0;
     var eN  = pl.filter(function(p){return p.estado==='En Ejecución';}).length;
@@ -2235,15 +2263,35 @@ function generarReporte() {
 
   function fmtL(n){return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2});}
 
-  // Build chart bars for each unit
-  var chartBars = unitData.map(function(u){
-    return '<div style="flex:1;text-align:center;">'
-      +'<div style="display:flex;gap:3px;align-items:flex-end;justify-content:center;height:120px;">'
-      +'<div style="width:18px;background:#1268C4;border-radius:3px 3px 0 0;height:'+Math.max(u.af,1)+'%;transition:.5s;" title="Físico '+u.af+'%"></div>'
-      +'<div style="width:18px;background:#0D7A4E;border-radius:3px 3px 0 0;height:'+Math.max(u.afin,1)+'%;transition:.5s;" title="Financiero '+u.afin+'%"></div>'
-      +'</div>'
-      +'<div style="font-size:10px;color:#666;margin-top:6px;line-height:1.3;">'+u.nombre.split(' ').slice(0,3).join('<br>')+'</div>'
-      +'<div style="font-size:10px;font-weight:600;color:#1268C4;margin-top:3px;">'+u.af+'% / '+u.afin+'%</div>'
+  // Build SVG donut pie charts per unit (outer ring=físico, inner ring=financiero)
+  function makePie(pct, color, r, cx, cy) {
+    var p = Math.min(Math.max(parseFloat(pct)||0,0),100);
+    var circ = 2*Math.PI*r;
+    var dash = (p/100)*circ;
+    var gap  = circ-dash;
+    return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#e8ecf0" stroke-width="14"/>'
+      +'<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+color+'" stroke-width="14"'
+      +' stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'"'
+      +' stroke-linecap="butt" transform="rotate(-90 '+cx+' '+cy+')" />';
+  }
+  var piecharts = unitData.map(function(u){
+    var cx=55,cy=55;
+    var label = u.nombre
+      .replace('Red Vial No Pavimentada','RV No Pavim.')
+      .replace('Red Vial Pavimentada','RV Pavimentada')
+      .replace('Respuesta Rápida a Emergencias','Resp. Rápida')
+      .replace('Fondos Externos/Nacionales','Fondos Ext/Nac')
+      .replace('Fondos BCIE','Fondos BCIE')
+      .replace('Limpieza de Derecho de Vía','Limp. D. de Vía');
+    return '<div style="text-align:center;width:150px;">'
+      +'<svg width="110" height="110" viewBox="0 0 110 110">'
+      + makePie(u.af,  '#1268C4', 42, cx, cy)
+      + makePie(u.afin,'#0D7A4E', 26, cx, cy)
+      +'<text x="'+cx+'" y="'+(cy-5)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#1268C4" font-family="monospace">'+u.af+'%</text>'
+      +'<text x="'+cx+'" y="'+(cy+10)+'" text-anchor="middle" font-size="10" fill="#0D7A4E" font-family="monospace">'+u.afin+'%</text>'
+      +'</svg>'
+      +'<div style="font-size:10px;color:#333;font-weight:600;margin-top:2px;line-height:1.4;">'+label+'</div>'
+      +'<div style="font-size:9px;color:#888;margin-top:1px;">'+u.total+' proy.</div>'
       +'</div>';
   }).join('');
 
@@ -2330,11 +2378,12 @@ function generarReporte() {
     +'<div class="kpi r"><div class="kpi-num">'+susp+'</div><div class="kpi-lbl">Suspendidos</div></div>'
     +'</div>'
 
-    // Gráfica avance por unidad
+    // Gráfica pastel avance por unidad
     +'<div class="section"><div class="section-title">Avance por Unidad</div><div class="section-body">'
-    +'<div class="chart-container">'+chartBars+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center;padding:10px 0;">'+piecharts+'</div>'
     +'<div class="legend"><div class="legend-item"><div class="legend-dot" style="background:#1268C4"></div>Avance Físico</div>'
-    +'<div class="legend-item"><div class="legend-dot" style="background:#0D7A4E"></div>Avance Financiero</div></div>'
+    +'<div class="legend-item"><div class="legend-dot" style="background:#0D7A4E"></div>Avance Financiero</div>'
+    +'<div class="legend-item"><div class="legend-dot" style="background:#e0e0e0"></div>Pendiente</div></div>'
     +'</div></div>'
 
     // Estado de proyectos
