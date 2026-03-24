@@ -1,1983 +1,408 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════
-//  SUPABASE — API REST directa (sin librería externa)
-// ═══════════════════════════════════════════════════════════
+// CONFIGURACIÓN SUPABASE
 var SUPA_URL = 'https://furbzmtimdvsterqenff.supabase.co/rest/v1';
 var SUPA_KEY = 'sb_publishable_v7rjxV61uvkibEfTDo6gJA_78Rzsocm';
-
-// Generar UUID en el cliente — evita depender de Supabase para obtener el ID
-function genUUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random() * 16 | 0;
-    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-  });
-}
-
-// SHA-256 via Web Crypto API (todos los navegadores modernos lo tienen)
-async function sha256hex(msg) {
-  var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
-  return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
-}
-
-var H_BASE  = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
-// x-app-secret: cabecera de firma para operaciones de escritura — debe coincidir con la política RLS
 var APP_SECRET = 'SIT_DGCV_2025_SECRET';
+var H_BASE = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
 var H_WRITE = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal', 'x-app-secret': APP_SECRET });
-var H_DEL   = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal', 'x-app-secret': APP_SECRET });
 
-function supaGet(table, query) {
-  return fetch(SUPA_URL + '/' + table + '?' + (query || ''), {
-    method: 'GET', headers: H_BASE
-  }).then(function(r) {
-    return r.text().then(function(t) {
-      if (!r.ok) throw new Error('GET ' + table + ' [' + r.status + ']: ' + t);
-      return t ? JSON.parse(t) : [];
-    });
-  });
-}
-
-function supaPost(table, body) {
-  return fetch(SUPA_URL + '/' + table, {
-    method: 'POST', headers: H_WRITE, body: JSON.stringify(body)
-  }).then(function(r) {
-    return r.text().then(function(t) {
-      if (!r.ok) throw new Error('POST ' + table + ' [' + r.status + ']: ' + t);
-      // return=minimal → 201 sin body, el ID ya lo generamos nosotros
-    });
-  });
-}
-
-function supaPatch(table, id, body) {
-  return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
-    method: 'PATCH', headers: H_WRITE, body: JSON.stringify(body)
-  }).then(function(r) {
-    return r.text().then(function(t) {
-      if (!r.ok) throw new Error('PATCH ' + table + ' [' + r.status + ']: ' + t);
-    });
-  });
-}
-
-function supaDelete(table, id) {
-  return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
-    method: 'DELETE', headers: H_DEL
-  }).then(function(r) {
-    if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
-  });
-}
-
-// ═══════════════════════════════════════════════════════════
-//  CONSTANTES DEL SISTEMA
-// ═══════════════════════════════════════════════════════════
-// USERS ya no está hardcodeado — se consulta Supabase en el login
-var UNIDAD_NOMBRES = {
-  admin: 'Administración General',
-  rvp:   'Red Vial Pavimentada',
-  rvnp:  'Red Vial No Pavimentada',
-  rre:   'Respuesta Rápida a Emergencias',
-  fext:  'Fondos Externos/Nacionales',
-  fbcie: 'Fondos BCIE',
-  ldv:   'Limpieza de Derecho de Vía'
-};
-
-var UNIDADES = {
-  rvp:   { nombre:'Red Vial Pavimentada',            color:'#1268C4', bg:'#D6EBF9' },
-  rvnp:  { nombre:'Red Vial No Pavimentada',         color:'#0D7A4E', bg:'#E3F5EE' },
-  rre:   { nombre:'Respuesta Rápida a Emergencias',  color:'#C0392B', bg:'#FBEAEA' },
-  fext:  { nombre:'Fondos Externos/Nacionales',      color:'#0A6E5C', bg:'#E0F5F0' },
-  fbcie: { nombre:'Fondos BCIE',                      color:'#7A3500', bg:'#FFF0E0' },
-  ldv:   { nombre:'Limpieza de Derecho de Vía',      color:'#B8620A', bg:'#FDF3E3' }
-};
-
-var ESTADOS = ['En Ejecución','En Proceso / Contratación','Suspendido','Terminado'];
-var DEPTOS  = ['Atlántida','Choluteca','Colón','Comayagua','Copán','Cortés','El Paraíso',
-               'Francisco Morazán','Gracias a Dios','Intibucá','Islas de la Bahía','La Paz',
-               'Lempira','Ocotepeque','Olancho','Santa Bárbara','Valle','Yoro'];
-
-var MUNICIPIOS = {
-  "Atlántida": ["La Ceiba","Tela","El Porvenir","Esparta","Jutiapa","La Masica","San Francisco","Arizona"],
-  "Choluteca": ["Choluteca","Apacilagua","Concepción de María","Duyure","El Corpus","El Triunfo","Marcovia","Morolica","Namasigüe","Orocuina","Pespire","San Antonio de Flores","San Isidro","San José","San Marcos de Colón","Santa Ana de Yusguare"],
-  "Colón": ["Trujillo","Balfate","Iriona","Limón","Sabá","Santa Fe","Santa Rosa de Aguán","Sonaguera","Tocoa","Bonito Oriental"],
-  "Comayagua": ["Comayagua","Ajuterique","El Rosario","Esquías","Humuya","La Libertad","Lamaní","La Trinidad","Lejamaní","Meámbar","Minas de Oro","Ojos de Agua","San Jerónimo","San José de Comayagua","San José del Potrero","San Luis","San Sebastián","Siguatepeque","Villa de San Antonio","Las Lajas","Taulabé"],
-  "Copán": ["Santa Rosa de Copán","Cabañas","Concepción","Copán Ruinas","Corquín","Cucuyagua","Dolores","Dulce Nombre","El Paraíso","Florida","La Jigua","La Unión","Nueva Arcadia","San Agustín","San Antonio","San Jerónimo","San José","San Juan de Opoa","San Nicolás","San Pedro","Santa Rita","Trinidad de Copán","Veracruz"],
-  "Cortés": ["San Pedro Sula","Choloma","La Lima","Naco","Omoa","Pimienta","Potrerillos","Puerto Cortés","San Antonio de Cortés","San Francisco de Yojoa","San Manuel","Santa Cruz de Yojoa","Villanueva"],
-  "El Paraíso": ["Yuscarán","Alauca","Danlí","El Paraíso","Güinope","Jacaleapa","Liure","Morocelí","Oropolí","Potrerillos","San Antonio de Flores","San Lucas","San Matías","Soledad","Teupasenti","Texiguat","Vado Ancho","Yauyupe","Trojes"],
-  "Francisco Morazán": ["Tegucigalpa","Alubarén","Cedros","Curarén","El Porvenir","Guaimaca","La Libertad","La Venta","Lepaterique","Maraita","Marale","Nueva Armenia","Ojojona","Orica","Reitoca","Sabanagrande","San Antonio de Oriente","San Buenaventura","San Ignacio","San Juan de Flores","San Miguelito","Santa Ana","Santa Lucía","Talanga","Tatumbla","Valle de Ángeles","Villa de San Francisco","Vallecillo"],
-  "Gracias a Dios": ["Puerto Lempira","Brus Laguna","Ahuas","Juan Francisco Bulnes","Villeda Morales","Wampusirpe"],
-  "Intibucá": ["La Esperanza","Camasca","Colomoncagua","Concepción","Dolores","Intibucá","Jesús de Otoro","Magdalena","Masaguara","San Antonio","San Francisco de Opalaca","San Isidro","San Juan","San Marcos de la Sierra","San Miguelito","Santa Lucía","Yamaranguila","San Francisco del Valle"],
-  "Islas de la Bahía": ["Roatán","Guanaja","José Santos Guardiola","Utila"],
-  "La Paz": ["La Paz","Aguanqueterique","Cabañas","Cane","Chinacla","Guajiquiro","Lauterique","Marcala","Mercedes de Oriente","Opatoro","San Antonio del Norte","San José","San Juan","San Pedro de Tutule","Santa Ana","Santa Elena","Santa María","Santiago de Puringla","Yarula"],
-  "Lempira": ["Gracias","Belén","Candelaria","Cololaca","Erandique","Gualcince","Guarita","La Campa","La Iguala","Las Flores","La Unión","La Virtud","Lepaera","Mapulaca","Piraera","San Andrés","San Francisco","San Juan Guarita","San Manuel Colohete","San Rafael","San Sebastián","Santa Cruz","Talgua","Tambla","Tomalá","Valladolid","Virginia","San Marcos de Caiquín"],
-  "Ocotepeque": ["Ocotepeque","Belén Gualcho","Concepción","Dolores Merendón","Fraternidad","La Encarnación","La Labor","Lucerna","Mercedes","San Fernando","San Francisco del Valle","San Jorge","San Marcos","Santa Fe","Sensenti","Sinuapa"],
-  "Olancho": ["Juticalpa","Campamento","Catacamas","Concordia","Dulce Nombre de Culmí","El Rosario","Esquipulas del Norte","Gualaco","Guarizama","Guata","Guayape","Jano","La Unión","Mangulile","Manto","Salama","San Carlos","San Esteban","San Francisco de Becerra","San Francisco de la Paz","Santa María del Real","Silca","Yocón","Patuca"],
-  "Santa Bárbara": ["Santa Bárbara","Arada","Atima","Azacualpa","Ceguaca","Chinda","Concepción del Norte","Concepción del Sur","Gualala","Ilama","Macuelizo","Naranjito","Nuevo Celilac","Petoa","Quimistán","San Francisco de Ojuera","San José de Colinas","San Luis","San Marcos","San Nicolás","San Pedro Zacapa","San Vicente Centenario","Santa Rita","Trinidad","Las Vegas","El Níspero"],
-  "Valle": ["Nacaome","Alianza","Amapala","Aramecina","Caridad","Goascorán","Langue","San Francisco de Coray","San Lorenzo"],
-  "Yoro": ["Yoro","Arenal","El Negrito","El Progreso","Jocon","Morazán","Olanchito","Santa Rita","Sulaco","Victoria","Yorito"]
-};
-
-
-// ═══════════════════════════════════════════════════════════
-//  ESTADO DE LA APLICACIÓN
-// ═══════════════════════════════════════════════════════════
-var DB          = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
-var EMPRESAS    = { constructoras:[], supervisoras:[] }; // cache de empresas precalificadas
+// ESTADO GLOBAL
+var DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
+var EMPRESAS = { constructoras:[], supervisoras:[] };
 var currentUser = null;
 var currentView = 'dashboard';
-var editingId   = null;
-var endosoCount = 0;
-var pagoCount   = 0;
-var dbOnline    = false;
+var editingId = null;
+var currentRegType = 'construccion'; // 'construccion' | 'supervision'
 
-// ═══════════════════════════════════════════════════════════
-//  UTILIDADES
-// ═══════════════════════════════════════════════════════════
-function fmtL(n) {
-  var v = parseFloat(n);
-  if (isNaN(v)) return '—';
-  return v.toLocaleString('es-HN', { minimumFractionDigits:2, maximumFractionDigits:2 });
-}
-
-function calcAvFin(p) {
-  var mI = parseFloat(p.montoContratoInicial) || 0;
-  var mM = parseFloat(p.montoModificacion) || 0;
-  var vig = mM > 0 ? mM : mI;
-  if (!vig) return 0;
-  var dev = parseFloat(p.totalDevengado) || 0;
-  return Math.min(parseFloat((dev / vig * 100).toFixed(2)), 100);
-}
-
-function fmtFecha(iso) {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleString('es-HN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
-  catch(e) { return iso; }
-}
-
-function saveLocalDB() {
-  try { localStorage.setItem('sit_db', JSON.stringify(DB)); } catch(e) {}
-}
-
-function setDbStatus(online) {
-  dbOnline = online;
-  var dot = document.getElementById('syncDot');
-  var lbl = document.getElementById('syncLabel');
-  if (dot) dot.style.background = online ? '#4CAF50' : '#FFA726';
-  if (lbl) lbl.textContent = online ? 'Base de datos conectada ✓' : 'Sin conexión — datos locales';
-}
-
-function showToast(msg, type) {
-  var t = document.getElementById('toast');
-  if (!t) return;
-  t.innerHTML = '<span>' + msg + '</span>';
-  t.className = 'toast ' + (type || 'ok') + ' show';
-  clearTimeout(t._t);
-  t._t = setTimeout(function() { t.classList.remove('show'); }, 4000);
-}
-
-function showBanner(msg) {
-  var b = document.getElementById('successBanner');
-  if (!b) return;
-  b.textContent = msg;
-  b.classList.add('show');
-  clearTimeout(b._t);
-  b._t = setTimeout(function() { b.classList.remove('show'); }, 3500);
-}
-
-// ═══════════════════════════════════════════════════════════
-//  SUPABASE — OPERACIONES
-// ═══════════════════════════════════════════════════════════
-function cargarProyectos() {
-  return supaGet('proyectos', 'select=*&order=created_at.desc')
-    .then(function(rows) {
-      DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
-      (rows || []).forEach(function(row) {
-        var proj = Object.assign({}, row.data || {}, { _sid: row.id, _unidad: row.unidad });
-        if (DB[row.unidad]) DB[row.unidad].push(proj);
-      });
-      setDbStatus(true);
-      saveLocalDB();
-    })
-    .catch(function(e) {
-      console.warn('Supabase error:', e.message);
-      try { DB = JSON.parse(localStorage.getItem('sit_db') || '{"rvp":[],"rvnp":[],"rre":[],"fext":[],"fbcie":[],"ldv":[]}'); }
-      catch(ex) { DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] }; }
-      setDbStatus(false);
-    });
-}
-
-function persistirProyecto(unidad, proj) {
-  var mI  = parseFloat(proj.montoContratoInicial) || 0;
-  var mM  = parseFloat(proj.montoModificacion) || 0;
-  var vig = mM > 0 ? mM : mI;
-
-  // Limpiar undefined del objeto antes de enviar a Supabase JSONB
-  var dataLimpia = JSON.parse(JSON.stringify(proj));
-
-  var row = {
-    unidad:            unidad,
-    proyecto:          proj.proyecto          || '',
-    departamento:      proj.departamento       || null,
-    estado:            proj.estado             || null,
-    avance_fisico:     parseFloat(proj.avanceFisico)     || 0,
-    avance_financiero: parseFloat(proj.avanceFinanciero) || 0,
-    total_devengado:   parseFloat(proj.totalDevengado)   || 0,
-    monto_vigente:     vig,
-    data:              dataLimpia
-  };
-
-  if (proj._sid) {
-    // UPDATE
-    return supaPatch('proyectos', proj._sid, row)
-      .then(function() { return proj._sid; });
-  } else {
-    // INSERT — UUID generado en cliente, no dependemos de la respuesta
-    var newId = genUUID();
-    row.id = newId;
-    return supaPost('proyectos', row)
-      .then(function() { return newId; });
-  }
-}
-
-
-// ═══════════════════════════════════════════════════════════
-//  EMPRESAS PRECALIFICADAS
-// ═══════════════════════════════════════════════════════════
-function cargarEmpresas() {
-  return supaGet('empresas', 'select=id,nombre,tipo,activa&activa=eq.true&order=nombre.asc')
-    .then(function(rows) {
-      EMPRESAS.constructoras = (rows||[]).filter(function(e){ return e.tipo==='constructora'||e.tipo==='ambas'; });
-      EMPRESAS.supervisoras  = (rows||[]).filter(function(e){ return e.tipo==='supervisora' ||e.tipo==='ambas'; });
-    })
-    .catch(function(e) {
-      console.warn('No se pudieron cargar empresas:', e.message);
-    });
-}
-
-// Renders a datalist-backed input with autocomplete from empresas
-function empresaInput(id, tipo, valor) {
-  var listId = 'dl-'+id;
-  var lista = tipo==='supervisora' ? EMPRESAS.supervisoras : EMPRESAS.constructoras;
-  var opts  = lista.map(function(e){ return '<option value="'+e.nombre.replace(/"/g,'&quot;')+'">'; }).join('');
-  return '<input type="text" id="'+id+'" value="'+valor+'" list="'+listId+'" placeholder="Escriba o seleccione..." autocomplete="off"/>'
-    +'<datalist id="'+listId+'">'+opts+'</datalist>';
-}
-
-// ═══════════════════════════════════════════════════════════
-//  AUTH
-// ═══════════════════════════════════════════════════════════
-async function doLogin() {
-  var unidad = document.getElementById('loginUnidad').value;
-  var user   = document.getElementById('loginUser').value.trim().toLowerCase();
-  var pass   = document.getElementById('loginPass').value;
-  var err    = document.getElementById('loginError');
-  var btn    = document.querySelector('.login-btn');
-
-  err.style.display = 'none';
-
-  if (!unidad || !user || !pass) {
-    err.style.display = 'block';
-    err.textContent = 'Complete todos los campos.';
-    return;
-  }
-
-  btn.textContent = 'Verificando...';
-  btn.disabled = true;
-
-  try {
-    // Hash SHA-256 de la contrasena antes de comparar con la BD
-    var passHash = await sha256hex(pass);
-
-    // Buscar usuario en Supabase
-    var rows = await supaGet('usuarios',
-      'select=*&username=eq.' + encodeURIComponent(user) +
-      '&password=eq.' + encodeURIComponent(passHash) +
-      '&activo=eq.true'
-    );
-
-    if (!rows || rows.length === 0) {
-      err.style.display = 'block';
-      err.textContent = 'Credenciales incorrectas o usuario inactivo.';
-      btn.textContent = 'Ingresar al Sistema';
-      btn.disabled = false;
-      return;
-    }
-
-    var u = rows[0];
-
-    // Verificar que la unidad seleccionada coincide (admin puede elegir cualquiera)
-    if (u.unidad !== 'admin' && u.unidad !== unidad) {
-      err.style.display = 'block';
-      err.textContent = 'El usuario no pertenece a la unidad seleccionada.';
-      btn.textContent = 'Ingresar al Sistema';
-      btn.disabled = false;
-      return;
-    }
-
-    // Login exitoso — cargar proyectos
-    btn.textContent = 'Cargando datos...';
-    await cargarProyectos();
-    await cargarEmpresas();
-
-    var efectiveUnidad = u.unidad === 'admin' ? unidad : u.unidad;
-    var esGlobalAdmin   = (u.unidad === 'admin' && u.rol === 'admin');   // Admin General → todo
-    var esGlobalViewer  = (u.unidad === 'admin' && u.rol !== 'admin');   // Coord. General → solo lectura
-    var esUnidadAdmin   = (u.unidad !== 'admin' && u.rol === 'admin');   // Admin de unidad → edita toda su unidad
-    var esUnidadCoord   = (u.unidad !== 'admin' && u.rol !== 'admin');   // Coord. de unidad → edita solo los suyos
-    currentUser = {
-      id:            u.id,
-      unidad:        efectiveUnidad,
-      nombre:        u.nombre,
-      rol:           UNIDAD_NOMBRES[efectiveUnidad] || u.unidad,
-      rolDB:         u.rol,                   // 'admin' | 'coordinador'
-      unidadDB:      u.unidad,                // unidad real de la BD (puede ser 'admin')
-      esAdmin:       esGlobalAdmin,           // acceso total + gestión usuarios
-      esGlobalAdmin: esGlobalAdmin,
-      esGlobalViewer:esGlobalViewer,          // ve todo, edita nada
-      esUnidadAdmin: esUnidadAdmin,           // edita toda su unidad
-      esUnidadCoord: esUnidadCoord            // edita solo sus propios proyectos
-    };
-
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('appShell').style.display    = 'flex';
-    document.getElementById('userName').textContent      = u.nombre;
-    document.getElementById('userAvatar').textContent    = u.nombre.split(' ').map(function(w){ return w[0]; }).join('').slice(0,2).toUpperCase();
-    document.getElementById('topbarFecha').textContent   = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'short',year:'numeric'});
-
-    var syncStatus = document.getElementById('syncStatus');
-    var syncBtn    = document.getElementById('syncBtn');
-    if (syncStatus) syncStatus.style.display = 'flex';
-    if (syncBtn)    syncBtn.style.display    = 'flex';
-
-    // Item de gestion de usuarios — solo visible para admins
-    var navUsuarios        = document.getElementById('nav-usuarios');
-    var navUsuariosSection = document.getElementById('nav-usuarios-section');
-    var navEmpresas        = document.getElementById('nav-empresas');
-    if (navUsuarios)        navUsuarios.style.display        = currentUser.esGlobalAdmin ? 'flex' : 'none';
-    if (navUsuariosSection) navUsuariosSection.style.display = currentUser.esGlobalAdmin ? 'block' : 'none';
-    if (navEmpresas)        navEmpresas.style.display        = currentUser.esGlobalAdmin ? 'flex' : 'none';
-    var reportBtn = document.getElementById('reportBtn');
-    if (reportBtn) reportBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
-
-    if (currentUser.esGlobalViewer) {
-      // Coord. General: ve todas las unidades pero sin opción de gestión de usuarios — nada se oculta en nav
-      // (nav-usuarios ya está oculto porque esAdmin=false)
-    } else if (!currentUser.esAdmin) {
-      // Coordinadores/admins de unidad: solo ven su unidad
-      document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
-        var v = el.id.replace('nav-', '');
-        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos') el.style.display = 'none';
-      });
-    }
-    // esGlobalAdmin: no oculta nada
-
-    updateBadges();
-    showView('dashboard', document.getElementById('nav-dashboard'));
-
-    btn.textContent = 'Ingresar al Sistema';
-    btn.disabled = false;
-
-    showToast(dbOnline ? 'Bienvenido, ' + u.nombre + '.' : 'Sesion iniciada (sin conexion a BD).', dbOnline ? 'ok' : 'err');
-
-  } catch(e) {
-    err.style.display = 'block';
-    err.textContent = 'Error de conexion. Verifique su red.';
-    btn.textContent = 'Ingresar al Sistema';
-    btn.disabled = false;
-  }
-}
-
-function doLogout() {
-  currentUser = null;
-  DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
-  document.getElementById('appShell').style.display  = 'none';
-  document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('loginPass').value = '';
-  document.getElementById('loginError').style.display = 'none';
-  document.querySelectorAll('.nav-item').forEach(function(el) { el.style.display = ''; });
-  var navUsuarios = document.getElementById('nav-usuarios');
-  var navUsuariosSection = document.getElementById('nav-usuarios-section');
-  var navEmpresasL = document.getElementById('nav-empresas');
-  if (navUsuarios) navUsuarios.style.display = 'none';
-  if (navUsuariosSection) navUsuariosSection.style.display = 'none';
-  if (navEmpresasL) navEmpresasL.style.display = 'none';
-}
-
-// ═══════════════════════════════════════════════════════════
-//  NAVEGACIÓN
-// ═══════════════════════════════════════════════════════════
-function showView(view, el) {
-  currentView = view;
-  document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
-  if (el) el.classList.add('active');
-  if (view === 'dashboard') renderDashboard();
-  else if (view === 'usuarios') renderUsuariosPanel();
-  else if (view === 'empresas') renderEmpresasPanel();
-  else if (view === 'formatos') renderFormatosPanel();
-  else renderUnidad(view);
-  if (isMobile && isMobile()) closeNav();
-}
-
-function updateBadges() {
-  Object.keys(UNIDADES).forEach(function(k) {
-    var b = document.getElementById('badge-' + k);
-    if (b) b.textContent = (DB[k] || []).length;
-  });
-}
-
-var UNIT_NAV_LOGOS = {
-  rvp: '<svg class=\"nav-icon\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"1\" y=\"9\" width=\"10\" height=\"5\" rx=\"1\" stroke=\"currentColor\" stroke-width=\"1.2\"/><circle cx=\"3.5\" cy=\"14\" r=\"1.5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"8.5\" cy=\"14\" r=\"1.5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><rect x=\"4\" y=\"6\" width=\"5\" height=\"3\" rx=\".5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><line x1=\"9\" y1=\"7.5\" x2=\"14\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/><circle cx=\"14\" cy=\"4.5\" r=\"1\" stroke=\"currentColor\" stroke-width=\"1.1\"/><line x1=\"1\" y1=\"3\" x2=\"15\" y2=\"3\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-dasharray=\"2 1.5\"/></svg>',
-  rvnp: '<svg class=\"nav-icon\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"6\" y=\"5\" width=\"8\" height=\"4\" rx=\".8\" stroke=\"currentColor\" stroke-width=\"1.2\"/><path d=\"M6 7H2L1 9H6\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"3\" cy=\"11\" r=\"1.5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"12\" cy=\"11\" r=\"1.5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M2 8.5L1 11H3\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/><line x1=\"1\" y1=\"13\" x2=\"15\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-dasharray=\"2 1.5\"/><line x1=\"10\" y1=\"5\" x2=\"10\" y2=\"3\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><rect x=\"8.5\" y=\"2\" width=\"3\" height=\"1.2\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1\"/></svg>',
-  rre: '<svg class=\"nav-icon\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"1\" y=\"9\" width=\"8\" height=\"4\" rx=\".8\" stroke=\"currentColor\" stroke-width=\"1.2\"/><circle cx=\"2.5\" cy=\"13.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"7.5\" cy=\"13.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><rect x=\"5\" y=\"6.5\" width=\"3\" height=\"2.5\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M8 7.5L11 4L13 5.5L11 8\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M13 5.5L14.5 4.5\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/><path d=\"M13 1.5L13 3M15 2.5L14 3.2M11 2.5L12 3.2\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/></svg>',
-  fext: '<svg class=\"nav-icon\" viewBox=\"0 0 16 16\" fill=\"none\"><line x1=\"4\" y1=\"1\" x2=\"4\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\"/><line x1=\"4\" y1=\"2\" x2=\"13\" y2=\"2\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\"/><line x1=\"4\" y1=\"2\" x2=\"9\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"13\" y1=\"2\" x2=\"10\" y2=\"5.5\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"10\" y1=\"5.5\" x2=\"10\" y2=\"9\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><rect x=\"8.5\" y=\"9\" width=\"3\" height=\"2.5\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1\"/><line x1=\"1\" y1=\"13\" x2=\"8\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/><circle cx=\"13\" cy=\"11\" r=\"2.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M13 9.8V10.5M13 11.5V12.2M12 11H14\" stroke=\"currentColor\" stroke-width=\".9\" stroke-linecap=\"round\"/></svg>',
-  fbcie: '<svg class=\"nav-icon\" viewBox=\"0 0 16 16\" fill=\"none\"><path d=\"M1 11 C1 11 4 4 8 4 S15 11 15 11\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\" fill=\"none\"/><line x1=\"1\" y1=\"11\" x2=\"15\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\"/><line x1=\"4.5\" y1=\"7.5\" x2=\"4.5\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"8\" y1=\"5\" x2=\"8\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"11.5\" y1=\"7.5\" x2=\"11.5\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"1\" y1=\"13\" x2=\"15\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-dasharray=\"2 1.5\"/></svg>',
-  ldv: '<svg class=\"nav-icon\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"1\" y=\"8\" width=\"7\" height=\"4\" rx=\".8\" stroke=\"currentColor\" stroke-width=\"1.2\"/><circle cx=\"2.5\" cy=\"12.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"6.5\" cy=\"12.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><rect x=\"4\" y=\"5.5\" width=\"3\" height=\"2.5\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M7 6.5L9.5 5L11 7L9 9\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9 9L9 11.5\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><path d=\"M13 3C13 3 12 5 12 7S13 9 13 9S14 7 14 5S13 3 13 3Z\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/><path d=\"M15 5C15 5 14 6.5 14 8\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/></svg>'
+// CONSTANTES
+var ESTADOS = ['En Ejecución','En Proceso / Contratación','Suspendido','Terminado'];
+var DEPTOS = ['Atlántida','Choluteca','Colón','Comayagua','Copán','Cortés','El Paraíso','Francisco Morazán','Gracias a Dios','Intibucá','Islas de la Bahía','La Paz','Lempira','Ocotepeque','Olancho','Santa Bárbara','Valle','Yoro'];
+var UNIDADES = {
+  rvp: { nombre:'Red Vial Pavimentada', color:'#1268C4', bg:'#D6EBF9' },
+  rvnp: { nombre:'Red Vial No Pavimentada', color:'#0D7A4E', bg:'#E3F5EE' },
+  rre: { nombre:'Respuesta Rápida a Emergencias', color:'#C0392B', bg:'#FBEAEA' },
+  fext: { nombre:'Fondos Externos/Nacionales', color:'#0A6E5C', bg:'#E0F5F0' },
+  fbcie: { nombre:'Fondos BCIE', color:'#7A3500', bg:'#FFF0E0' },
+  ldv: { nombre:'Limpieza de Derecho de Vía', color:'#B8620A', bg:'#FDF3E3' }
 };
 
-// ═══════════════════════════════════════════════════════════
-//  ALERTAS DE VENCIMIENTO DE FIANZAS
-// ═══════════════════════════════════════════════════════════
-function getAlertasFianzas() {
-  var hoy = new Date(); hoy.setHours(0,0,0,0);
-  var alertas = [];
-
-  Object.entries(DB).forEach(function(entry) {
-    var unidadKey = entry[0]; var proyectos = entry[1];
-    (proyectos||[]).forEach(function(p) {
-
-      // CONDICIÓN 2: proyecto Terminado → no genera alertas de fianzas
-      if (p.estado === 'Terminado') return;
-
-      // CONDICIÓN 3: devuelve la fecha efectiva de alerta para una fianza.
-      // Si existe un endoso vinculado a esa fianza con nueva fecha de vencimiento,
-      // se usa la fecha más reciente del endoso en lugar de la fecha original.
-      function fechaEfectiva(nFianza, fechaOriginal) {
-        if (!fechaOriginal || !nFianza) return fechaOriginal || null;
-        var endosos = p.endosos || [];
-        var vinculados = endosos.filter(function(e) {
-          return e.fianzaVinculada && e.nuevaFechaVenc &&
-                 e.fianzaVinculada.indexOf(nFianza) >= 0;
-        });
-        if (!vinculados.length) return fechaOriginal;
-        // Usar la fecha de vencimiento más lejana del endoso más reciente
-        vinculados.sort(function(a,b){
-          return a.nuevaFechaVenc > b.nuevaFechaVenc ? -1 : 1;
-        });
-        return vinculados[0].nuevaFechaVenc;
-      }
-
-      var checks = [
-        { tipo:'ANTICIPO',     n:p.nFianzaAnticipo,     fechaOrig:p.finFA,   fecha:fechaEfectiva(p.nFianzaAnticipo,     p.finFA)   },
-        { tipo:'CUMPLIMIENTO', n:p.nFianzaCumplimiento, fechaOrig:p.finFC,   fecha:fechaEfectiva(p.nFianzaCumplimiento, p.finFC)   },
-        { tipo:'CALIDAD',      n:p.nFianzaCalidad,      fechaOrig:p.finFCal, fecha:fechaEfectiva(p.nFianzaCalidad,      p.finFCal) },
-      ];
-
-      checks.forEach(function(c) {
-        if (!c.fecha || !c.n) return;
-        var f = new Date(c.fecha); f.setHours(0,0,0,0);
-        var diasRestantes = Math.round((f - hoy) / (1000*60*60*24));
-        var estado = diasRestantes < 0  ? 'vencida'
-                   : diasRestantes <= 30 ? 'prox30'
-                   : diasRestantes <= 60 ? 'prox60'
-                   : null;
-        if (!estado) return;
-        alertas.push({
-          proyecto:     p.proyecto || '—',
-          unidad:       UNIDADES[unidadKey] ? UNIDADES[unidadKey].nombre : unidadKey,
-          tipo:         c.tipo,
-          n:            c.n,
-          fecha:        c.fecha,
-          esEndoso:     c.fecha !== c.fechaOrig,
-          diasRestantes:diasRestantes,
-          estado:       estado
-        });
-      });
-    });
-  });
-
-  // Ordenar: vencidas primero, luego por días restantes
-  alertas.sort(function(a,b){
-    if (a.estado==='vencida' && b.estado!=='vencida') return -1;
-    if (b.estado==='vencida' && a.estado!=='vencida') return  1;
-    return a.diasRestantes - b.diasRestantes;
-  });
-  return alertas;
-}
-
-function renderAlertasBanner(alertas) {
-  if (!alertas || !alertas.length) return '';
-
-  var vencidas = alertas.filter(function(a){ return a.estado==='vencida'; });
-  var proximas = alertas.filter(function(a){ return a.estado!=='vencida'; });
-
-  var rows = alertas.map(function(a) {
-    var tagClass = a.estado==='vencida' ? 'vencida' : a.estado==='prox30' ? 'prox30' : 'prox60';
-    var tagText  = a.estado==='vencida'
-      ? 'Vencida hace '+(Math.abs(a.diasRestantes))+' día'+(Math.abs(a.diasRestantes)!==1?'s':'')
-      : 'Vence en '+a.diasRestantes+' día'+(a.diasRestantes!==1?'s':'');
-    var endosoBadge = a.esEndoso
-      ? '<span style="font-size:8px;background:var(--verde-l);color:var(--verde);padding:1px 6px;border-radius:4px;margin-left:5px;font-weight:600;flex-shrink:0;">ENDOSO</span>'
-      : '';
-    return '<div class="alerta-row">'
-      +'<span class="alerta-tag '+tagClass+'">'+tagText+'</span>'
-      +'<span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+a.proyecto+'</span>'
-      +endosoBadge
-      +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;">'+a.tipo+'</span>'
-      +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;font-family:var(--mono);font-size:10px;">'+a.n+'</span>'
-      +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;">'+a.unidad.split(' ').slice(0,3).join(' ')+'</span>'
-      +'</div>';
-  }).join('');
-
-  var headerParts = [];
-  if (vencidas.length) headerParts.push('<span class="alerta-count vencida">'+vencidas.length+' vencida'+(vencidas.length!==1?'s':'')+'</span>');
-  if (proximas.length) headerParts.push('<span class="alerta-count prox">'+proximas.length+' por vencer</span>');
-
-  var dominante = vencidas.length ? 'vencida' : 'prox';
-
-  return '<div class="alerta-banner" id="alerta-banner">'
-    +'<div class="alerta-header" onclick="toggleAlertaBanner()">'
-    +'<span class="alerta-dot '+dominante+'"></span>'
-    +'<span style="font-size:12px;font-weight:600;color:var(--gris1);">⚠️  Alertas de Garantías / Fianzas</span>'
-    +headerParts.join(' ')
-    +'<span class="alerta-toggle" id="alerta-toggle-icon">▼ ver detalle</span>'
-    +'</div>'
-    +'<div class="alerta-list" id="alerta-list" style="display:none;">'+rows+'</div>'
-    +'</div>';
-}
-
-function toggleAlertaBanner() {
-  var list = document.getElementById('alerta-list');
-  var icon = document.getElementById('alerta-toggle-icon');
-  if (!list) return;
-  var open = list.style.display !== 'none';
-  list.style.display = open ? 'none' : 'block';
-  if (icon) icon.textContent = open ? '▼ ver detalle' : '▲ ocultar';
-}
-
-// ═══════════════════════════════════════════════════════════
-//  DASHBOARD
-// ═══════════════════════════════════════════════════════════
-function renderDashboard() {
-  var allP  = Object.values(DB).flat();
-  var total = allP.length;
-  var ejec  = allP.filter(function(p){ return p.estado === 'En Ejecución'; }).length;
-  var susp  = allP.filter(function(p){ return p.estado === 'Suspendido'; }).length;
-  var avgF  = total ? Math.round(allP.reduce(function(a,p){ return a + (parseFloat(p.avanceFisico)||0); }, 0) / total) : 0;
-  var avgFin= total ? Math.round(allP.reduce(function(a,p){ return a + calcAvFin(p); }, 0) / total) : 0;
-
-  var chartBars = Object.entries(UNIDADES).map(function(entry) {
-    var k = entry[0]; var u = entry[1];
-    var pl = DB[k] || [];
-    var af   = pl.length ? Math.round(pl.reduce(function(a,p){ return a+(parseFloat(p.avanceFisico)||0); },0)/pl.length) : 0;
-    var afin = pl.length ? Math.round(pl.reduce(function(a,p){ return a+calcAvFin(p); },0)/pl.length) : 0;
-    return '<div class="chart-bar-group">' +
-      '<div style="display:flex;gap:2px;align-items:flex-end;height:90px;">' +
-        '<div class="chart-bar" style="flex:1;height:'+Math.max(af,2)+'%;background:var(--az3);" title="Físico: '+af+'%"></div>' +
-        '<div class="chart-bar" style="flex:1;height:'+Math.max(afin,2)+'%;background:var(--verde);" title="Financiero: '+afin+'%"></div>' +
-      '</div>' +
-      '<div class="chart-bar-lbl" style="font-size:8px">' + u.nombre.split(' ').slice(0,2).join(' ') + '</div>' +
-    '</div>';
-  }).join('');
-
-  var ucards = Object.entries(UNIDADES).map(function(entry) {
-    var k = entry[0]; var u = entry[1];
-    var pl = DB[k] || [];
-    var af   = pl.length ? Math.round(pl.reduce(function(a,p){ return a+(parseFloat(p.avanceFisico)||0); },0)/pl.length) : 0;
-    var afin = pl.length ? Math.round(pl.reduce(function(a,p){ return a+calcAvFin(p); },0)/pl.length) : 0;
-    var eN = pl.filter(function(p){ return p.estado==='En Ejecución'; }).length;
-    var sN = pl.filter(function(p){ return p.estado==='Suspendido'; }).length;
-    var canNav = currentUser && (currentUser.esGlobalAdmin || currentUser.esGlobalViewer || currentUser.unidad===k);
-    return '<div class="unidad-card" onclick="' + (canNav ? 'showView(\''+k+'\',document.getElementById(\'nav-'+k+'\'))' : '') + '">' +
-      '<div class="uc-header">' +
-        '<div class="uc-icon" style="background:'+u.bg+';width:36px;height:36px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:'+u.color+'">'+(UNIT_NAV_LOGOS[k]||'')+'</div>' +
-        '<div><div class="uc-title">'+u.nombre+'</div><div class="uc-sub">'+pl.length+' proyecto'+(pl.length!==1?'s':'')+'</div></div>' +
-        '<div class="uc-arrow" style="color:'+u.color+'">→</div>' +
-      '</div>' +
-      '<div class="uc-stats">' +
-        '<div class="uc-stat"><div class="uc-stat-num" style="color:'+u.color+'">'+eN+'</div><div class="uc-stat-lbl">En Ejecución</div></div>' +
-        '<div class="uc-stat"><div class="uc-stat-num" style="color:'+(sN>0?'var(--amarillo)':u.color)+'">'+sN+'</div><div class="uc-stat-lbl">Suspendidos</div></div>' +
-      '</div>' +
-      '<div class="uc-bar-row"><span class="uc-bar-lbl">Físico</span><div class="uc-bar-track"><div class="uc-bar-fill" style="width:'+af+'%;background:'+u.color+'"></div></div><span class="uc-bar-pct">'+af+'%</span></div>' +
-      '<div class="uc-bar-row"><span class="uc-bar-lbl">Financiero</span><div class="uc-bar-track"><div class="uc-bar-fill" style="width:'+afin+'%;background:var(--verde)"></div></div><span class="uc-bar-pct">'+afin+'%</span></div>' +
-    '</div>';
-  }).join('');
-
-  document.getElementById('mainContent').innerHTML =
-    '<div class="page-header"><h2>Dashboard General — Red Vial Nacional</h2><p>Resumen ejecutivo de todas las unidades · Año 2025</p></div>' +
-    renderAlertasBanner(getAlertasFianzas()) +
-    '<div class="kpi-grid">' +
-      '<div class="kpi-card az"><div class="kpi-num">'+total+'</div><div class="kpi-lbl">Total de Proyectos</div></div>' +
-      '<div class="kpi-card verde"><div class="kpi-num">'+ejec+'</div><div class="kpi-lbl">En Ejecución</div></div>' +
-      '<div class="kpi-card amarillo"><div class="kpi-num">'+avgF+'%</div><div class="kpi-lbl">Avance Físico Prom.</div></div>' +
-      '<div class="kpi-card az"><div class="kpi-num">'+avgFin+'%</div><div class="kpi-lbl">Avance Financiero Prom.</div></div>' +
-      '<div class="kpi-card '+(susp>0?'rojo':'gris')+'"><div class="kpi-num">'+susp+'</div><div class="kpi-lbl">Suspendidos</div></div>' +
-    '</div>' +
-    '<div class="chart-wrap"><div class="chart-title"><span>Avance por Unidad</span><div class="chart-legend"><div class="chart-legend-item"><div class="chart-legend-dot" style="background:var(--az3)"></div>Físico</div><div class="chart-legend-item"><div class="chart-legend-dot" style="background:var(--verde)"></div>Financiero</div></div></div><div class="chart-bars">'+chartBars+'</div></div>' +
-    '<div style="font-size:12px;font-weight:600;color:var(--gris2);margin-bottom:10px;">Módulos por Unidad</div>' +
-    '<div class="unidades-grid">'+ucards+'</div>';
-}
-
-// ═══════════════════════════════════════════════════════════
-//  PERMISOS
-//  Retorna objeto { canAdd, canEdit, canDelete } para un proyecto p
-//  Si p es null, evalúa permisos de "nuevo proyecto"
-// ═══════════════════════════════════════════════════════════
-function getPerms(unidadKey, p) {
-  var cu = currentUser;
-  if (!cu) return { canAdd:false, canEdit:false, canDelete:false };
-
-  // Admin General: todo permitido en toda unidad
-  if (cu.esGlobalAdmin) return { canAdd:true, canEdit:true, canDelete:true };
-
-  // Coordinator General (unidad=admin, rol=coordinador): solo lectura
-  if (cu.esGlobalViewer) return { canAdd:false, canEdit:false, canDelete:false };
-
-  // Usuarios de otra unidad: sin acceso
-  if (cu.unidad !== unidadKey) return { canAdd:false, canEdit:false, canDelete:false };
-
-  // Admin de unidad: puede todo dentro de su unidad
-  if (cu.esUnidadAdmin) return { canAdd:true, canEdit:true, canDelete:true };
-
-  // Coordinador de unidad: solo puede editar/eliminar sus propios proyectos
-  if (cu.esUnidadCoord) {
-    var esMio = p && p.historial && p.historial.length > 0 && p.historial[0].usuario === cu.nombre;
-    return { canAdd:true, canEdit:!!esMio, canDelete:!!esMio };
-  }
-
-  return { canAdd:false, canEdit:false, canDelete:false };
-}
-
-var UNIT_HDR_LOGOS = {
-  rvp: '<svg style=\"width:28px;height:28px;\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"1\" y=\"9\" width=\"10\" height=\"5\" rx=\"1\" stroke=\"currentColor\" stroke-width=\"1.2\"/><circle cx=\"3.5\" cy=\"14\" r=\"1.5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"8.5\" cy=\"14\" r=\"1.5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><rect x=\"4\" y=\"6\" width=\"5\" height=\"3\" rx=\".5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><line x1=\"9\" y1=\"7.5\" x2=\"14\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/><circle cx=\"14\" cy=\"4.5\" r=\"1\" stroke=\"currentColor\" stroke-width=\"1.1\"/><line x1=\"1\" y1=\"3\" x2=\"15\" y2=\"3\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-dasharray=\"2 1.5\"/></svg>',
-  rvnp: '<svg style=\"width:28px;height:28px;\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"6\" y=\"5\" width=\"8\" height=\"4\" rx=\".8\" stroke=\"currentColor\" stroke-width=\"1.2\"/><path d=\"M6 7H2L1 9H6\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"3\" cy=\"11\" r=\"1.5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"12\" cy=\"11\" r=\"1.5\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M2 8.5L1 11H3\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/><line x1=\"1\" y1=\"13\" x2=\"15\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-dasharray=\"2 1.5\"/><line x1=\"10\" y1=\"5\" x2=\"10\" y2=\"3\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><rect x=\"8.5\" y=\"2\" width=\"3\" height=\"1.2\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1\"/></svg>',
-  rre: '<svg style=\"width:28px;height:28px;\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"1\" y=\"9\" width=\"8\" height=\"4\" rx=\".8\" stroke=\"currentColor\" stroke-width=\"1.2\"/><circle cx=\"2.5\" cy=\"13.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"7.5\" cy=\"13.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><rect x=\"5\" y=\"6.5\" width=\"3\" height=\"2.5\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M8 7.5L11 4L13 5.5L11 8\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M13 5.5L14.5 4.5\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/><path d=\"M13 1.5L13 3M15 2.5L14 3.2M11 2.5L12 3.2\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/></svg>',
-  fext: '<svg style=\"width:28px;height:28px;\" viewBox=\"0 0 16 16\" fill=\"none\"><line x1=\"4\" y1=\"1\" x2=\"4\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\"/><line x1=\"4\" y1=\"2\" x2=\"13\" y2=\"2\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\"/><line x1=\"4\" y1=\"2\" x2=\"9\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"13\" y1=\"2\" x2=\"10\" y2=\"5.5\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"10\" y1=\"5.5\" x2=\"10\" y2=\"9\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><rect x=\"8.5\" y=\"9\" width=\"3\" height=\"2.5\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1\"/><line x1=\"1\" y1=\"13\" x2=\"8\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/><circle cx=\"13\" cy=\"11\" r=\"2.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M13 9.8V10.5M13 11.5V12.2M12 11H14\" stroke=\"currentColor\" stroke-width=\".9\" stroke-linecap=\"round\"/></svg>',
-  fbcie: '<svg style=\"width:28px;height:28px;\" viewBox=\"0 0 16 16\" fill=\"none\"><path d=\"M1 11 C1 11 4 4 8 4 S15 11 15 11\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\" fill=\"none\"/><line x1=\"1\" y1=\"11\" x2=\"15\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\"/><line x1=\"4.5\" y1=\"7.5\" x2=\"4.5\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"8\" y1=\"5\" x2=\"8\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"11.5\" y1=\"7.5\" x2=\"11.5\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"1\" y1=\"13\" x2=\"15\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-dasharray=\"2 1.5\"/></svg>',
-  ldv: '<svg style=\"width:28px;height:28px;\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"1\" y=\"8\" width=\"7\" height=\"4\" rx=\".8\" stroke=\"currentColor\" stroke-width=\"1.2\"/><circle cx=\"2.5\" cy=\"12.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"6.5\" cy=\"12.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><rect x=\"4\" y=\"5.5\" width=\"3\" height=\"2.5\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M7 6.5L9.5 5L11 7L9 9\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9 9L9 11.5\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><path d=\"M13 3C13 3 12 5 12 7S13 9 13 9S14 7 14 5S13 3 13 3Z\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/><path d=\"M15 5C15 5 14 6.5 14 8\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/></svg>'
-};
-
-// ═══════════════════════════════════════════════════════════
-//  MÓDULO DE UNIDAD — TABLA DE PROYECTOS
-// ═══════════════════════════════════════════════════════════
-function renderUnidad(u) {
-  var unidad   = UNIDADES[u];
-  var plist    = DB[u] || [];
-  var permsNew = getPerms(u, null);  // permisos para "Nuevo Proyecto" (p=null)
-  // Alertas de fianzas para esta unidad
-  var alertasUnidad = getAlertasFianzas().filter(function(a){
-    return a.unidad === (UNIDADES[u] ? UNIDADES[u].nombre : u);
-  });
-  var alertasBannerUnidad = alertasUnidad.length ? renderAlertasBanner(alertasUnidad) : '';
-  var af   = plist.length ? Math.round(plist.reduce(function(a,p){ return a+(parseFloat(p.avanceFisico)||0); },0)/plist.length) : 0;
-  var afin = plist.length ? Math.round(plist.reduce(function(a,p){ return a+calcAvFin(p); },0)/plist.length) : 0;
-
-  var SC = { 'En Ejecución':'ejec','En Proceso / Contratación':'proc','Suspendido':'susp','Terminado':'term' };
-
-  var rows = plist.length ? plist.map(function(p, i) {
-    var sc   = SC[p.estado] || 'proc';
-    var paf  = parseFloat(p.avanceFisico) || 0;
-    var pafin= calcAvFin(p);
-    var cPor = p.historial && p.historial.length ? p.historial[0].usuario : '—';
-    var uMod  = p.historial && p.historial.length > 1 ? p.historial[p.historial.length-1] : null;
-    var perms = getPerms(u, p);  // permisos individuales para este proyecto
-    return '<tr>' +
-      '<td style="font-family:var(--mono);color:var(--gris3);font-size:10px">'+(String(i+1).padStart(2,'0'))+'</td>' +
-      '<td style="max-width:200px"><div style="font-weight:500;font-size:12px;line-height:1.3">'+p.proyecto+'</div><div style="font-size:10px;color:var(--gris3);margin-top:2px">'+(p.departamento||'')+(p.municipio?' · '+p.municipio:'')+'</div></td>' +
-      '<td style="font-size:11px;color:var(--gris2)">'+(p.constructora||'—')+'</td>' +
-      '<td><div style="font-size:11px;font-weight:500;color:var(--az2)">'+cPor+'</div>'+(uMod&&uMod.usuario!==cPor?'<div style="font-size:9px;color:var(--gris3)">Mod: '+uMod.usuario+'</div>':'')+'</td>' +
-      '<td><div class="mini-bar"><div class="mini-bar-fill az-fill" style="width:'+Math.min(paf,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(paf.toFixed(1))+'%</div></td>' +
-      '<td><div class="mini-bar"><div class="mini-bar-fill gr-fill" style="width:'+Math.min(pafin,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(pafin.toFixed(1))+'%</div></td>' +
-      '<td style="font-size:11px;font-family:var(--mono);color:var(--gris2)">'+(p.noContrato||'—')+'</td>' +
-      '<td><span class="pill '+sc+'">'+(p.estado||'—')+'</span></td>' +
-      '<td><div class="tbl-actions">' +
-        '<button class="tbl-btn" onclick="openDetail(\''+u+'\','+i+')">Ver</button>' +
-        (perms.canEdit   ? '<button class="tbl-btn edit" onclick="(\''+u+'\','+i+')">Editar</button>' : '') +
-        (perms.canDelete ? '<button class="tbl-btn" style="color:var(--rojo)" onclick="deleteProject(\''+u+'\','+i+')">✕</button>' : '') +
-      '</div></td>' +
-    '</tr>';
-  }).join('') :
-    '<tr><td colspan="9"><div class="empty-state"><svg viewBox="0 0 36 36" fill="none" style="width:32px;margin:0 auto 8px;display:block;opacity:.3"><rect x="4" y="8" width="28" height="22" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M12 8V6a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.5"/><path d="M12 18h12M12 23h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><p>No hay proyectos registrados.'+(permsNew.canAdd?' Haga clic en "Nuevo Proyecto" para comenzar.':'')+'</p></div></td></tr>';
-
-  document.getElementById('mainContent').innerHTML =
-    '<div class="module-header" style="background:'+unidad.color+'">' +
-      '<div class="module-icon" style="background:rgba(255,255,255,.18);border-radius:8px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:#fff;">'+(UNIT_HDR_LOGOS[u]||'')+'</div>' +
-      '<div class="module-info"><h2>'+unidad.nombre+'</h2><p>'+plist.length+' proyecto'+(plist.length!==1?'s':'')+' registrado'+(plist.length!==1?'s':'')+'</p></div>' +
-      '<div class="module-kpis"><div class="mod-kpi"><div class="mod-kpi-num">'+af+'%</div><div class="mod-kpi-lbl">Físico</div></div><div class="mod-kpi"><div class="mod-kpi-num">'+afin+'%</div><div class="mod-kpi-lbl">Financiero</div></div><div class="mod-kpi"><div class="mod-kpi-num">'+plist.filter(function(p){return p.estado==='En Ejecución';}).length+'</div><div class="mod-kpi-lbl">En Ejecución</div></div></div>' +
-    '</div>' +
-    alertasBannerUnidad +
-    (currentUser.esGlobalViewer ? '<div style="background:var(--amarillo-l);border:1px solid #d4a500;border-radius:6px;padding:9px 14px;margin-bottom:12px;font-size:11px;color:var(--amarillo);display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.3"/><path d="M7 4v3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="7" cy="10" r=".6" fill="currentColor"/></svg><strong>Modo solo lectura</strong> — Su perfil tiene acceso de visualización. Para modificar proyectos contacte al coordinador de la unidad.</div>' : '') +
-    '<div class="table-wrap">' +
-      '<div class="table-toolbar">' +
-        '<h3>Proyectos Registrados</h3>' +
-        '<div class="search-box"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="var(--gris3)" stroke-width="1.2"/><path d="M8 8l2.5 2.5" stroke="var(--gris3)" stroke-width="1.2" stroke-linecap="round"/></svg><input type="text" placeholder="Buscar..." oninput="filterTable(this.value,\''+u+'\')" /></div>' +
-        '<select class="filter-select" onchange="filterEstado(this.value,\''+u+'\')">' +
-          '<option value="">Todos los estados</option>' +
-          ESTADOS.map(function(e){ return '<option>'+e+'</option>'; }).join('') +
-        '</select>' +
-        (permsNew.canAdd ? '<button class="btn btn-primary" onclick="openForm(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
-      '</div>' +
-      '<div style="overflow-x:auto"><table class="tbl" id="tbl-'+u+'">' +
-        '<thead><tr><th>N°</th><th>Proyecto</th><th>Constructora</th><th>Registrado por</th><th>Av. Físico</th><th>Av. Financiero</th><th>N° Contrato</th><th>Estado</th><th>Acciones</th></tr></thead>' +
-        '<tbody id="tbody-'+u+'">'+rows+'</tbody>' +
-      '</table></div>' +
-    '</div>';
-}
-
-function filterTable(q, u) {
-  var qL = q.toLowerCase().trim();
-  var plist = DB[u] || [];
-  document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r, i) {
-    if (!qL) { r.style.display = ''; return; }
-    var p = plist[i];
-    if (!p) { r.style.display = 'none'; return; }
-    // Busca en: N° Proceso, N° Contrato, Nombre del Proyecto, Constructora, Supervisora
-    var fields = [
-      p.nProceso    || '',
-      p.noContrato  || '',
-      p.proyecto    || '',
-      p.constructora|| '',
-      p.supervisora || ''
-    ];
-    r.style.display = fields.some(function(f){ return f.toLowerCase().includes(qL); }) ? '' : 'none';
-  });
-}
-function filterEstado(e, u) {
-  document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r) {
-    r.style.display = (!e || r.textContent.includes(e)) ? '' : 'none';
-  });
-}
-
-// ═══════════════════════════════════════════════════════════
-//  PANEL DE DETALLE
-// ═══════════════════════════════════════════════════════════
-function openDetail(u, i) {
-  var p = DB[u][i];
-  if (!p) return;
-  document.getElementById('dpTitle').textContent = p.proyecto || 'Sin nombre';
-  document.getElementById('dpSub').textContent   = UNIDADES[u].nombre + ' · ' + (p.departamento||'') + (p.municipio?' · '+p.municipio:'');
-
-  var SC = { 'En Ejecución':'ejec','En Proceso / Contratación':'proc','Suspendido':'susp','Terminado':'term' };
-  var sc  = SC[p.estado] || 'proc';
-  var af  = parseFloat(p.avanceFisico) || 0;
-  var afin= calcAvFin(p);
-  var cPor= p.historial && p.historial.length ? p.historial[0] : null;
-  var uMod= p.historial && p.historial.length > 1 ? p.historial[p.historial.length-1] : null;
-
-  var pagosHtml = (p.pagos||[]).length ? (p.pagos||[]).map(function(pg,idx) {
-    return '<div style="background:var(--gris6);border-radius:5px;padding:8px 10px;margin-bottom:5px;">' +
-      '<div style="display:flex;justify-content:space-between"><span style="font-size:11px;font-weight:500">Pago N° '+(idx+1)+'</span><span style="font-size:13px;font-weight:500;color:var(--verde);font-family:var(--mono)">L '+fmtL(pg.monto)+'</span></div>' +
-      '<div style="font-size:10px;color:var(--gris3);margin-top:4px;display:flex;flex-wrap:wrap;gap:8px">' +
-        (pg.fechaIngreso ? '<span>Ingreso: '+pg.fechaIngreso+'</span>' : '') +
-        ((pg.periodoIni||pg.periodoFin) ? '<span>Período: '+(pg.periodoIni||'?')+' → '+(pg.periodoFin||'?')+'</span>' : '') +
-        (pg.contexto ? '<span>'+pg.contexto+'</span>' : '') +
-      '</div>' +
-    '</div>';
-  }).join('') : '<div style="font-size:11px;color:var(--gris3)">Sin pagos registrados</div>';
-
-  var histHtml = (p.historial||[]).length ? [...(p.historial||[])].reverse().map(function(h, idx) {
-    var cambios = Array.isArray(h.cambios) ? h.cambios : [h.cambios||''];
-    var color   = h.accion==='Creación' ? 'var(--verde)' : 'var(--az3)';
-    return '<div class="hist-row" style="cursor:pointer" onclick="toggleHistDetail(\'hd'+idx+'\')">' +
-      '<div class="hist-dot" style="background:'+color+'"></div>' +
-      '<div style="flex:1"><span style="font-size:11px;font-weight:500;color:'+color+'">'+(h.accion||'Cambio')+'</span> <span style="font-size:11px">'+h.usuario+'</span>' +
-        '<div id="hd'+idx+'" style="display:none;margin-top:4px;background:var(--gris6);border-radius:4px;padding:6px 8px">'+
-          cambios.map(function(c){ return '<div style="font-size:10px;color:var(--gris2);padding:2px 0;border-bottom:1px solid var(--border)">'+c+'</div>'; }).join('') +
-        '</div>' +
-      '</div>' +
-      '<div class="hist-fecha">'+fmtFecha(h.fecha)+'</div>' +
-    '</div>';
-  }).join('') : '<div style="font-size:11px;color:var(--gris3)">Sin historial</div>';
-
-  document.getElementById('dpBody').innerHTML =
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">' +
-      '<span class="pill '+sc+'">'+(p.estado||'—')+'</span>' +
-      (cPor ? '<span style="font-size:10px;color:var(--gris3)">Creado por <strong style="color:var(--az2)">'+cPor.usuario+'</strong></span>' : '') +
-    '</div>' +
-    (uMod ? '<div style="background:var(--amarillo-l);border-radius:5px;padding:6px 10px;margin-bottom:10px;font-size:10px;color:var(--amarillo)">Última modificación por <strong>'+uMod.usuario+'</strong> · '+fmtFecha(uMod.fecha)+'</div>' : '') +
-    '<div class="dp-section"><div class="dp-section-title">Identificación</div>' +
-      dpRow('N° Proceso', p.nProceso) + dpRow('Descripción', p.descripcion) + dpRow('Longitud', p.longitud ? p.longitud+' km' : null) +
-      dpRow('Beneficiarios', p.beneficiarios) + dpRow('Empleados Directos', p.empleadosDirectos) + dpRow('Empleados Indirectos', p.empleadosIndirectos) +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title">Ubicación</div>' +
-      dpRow('Departamento', p.departamento) + dpRow('Municipio', p.municipio) + dpRow('Aldea / Barrio', p.aldeaBarrio) +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title">Empresa Constructora</div>' +
-      dpRow('Empresa', p.constructora) + dpRow('N° Contrato', p.noContrato) + dpRow('Coordinador', p.coordinador) + dpRow('Supervisor de Campo', p.supervisor) +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title">Supervisión</div>' +
-      '<div class="dp-row"><span class="dl">Tipo</span><span class="dv"><span style="background:'+(p.tipoSupervision==='interna'?'var(--verde-l)':'var(--az6)')+';color:'+(p.tipoSupervision==='interna'?'var(--verde)':'var(--az2)')+';padding:2px 8px;border-radius:8px;font-size:10px">'+(p.tipoSupervision==='interna'?'Supervisión Interna DGCV':'Supervisión Externa')+'</span></span></div>' +
-      (p.tipoSupervision!=='interna' ? dpRow('Empresa Supervisora',p.supervisora)+dpRow('N° Contrato',p.noContratoSup) : '') +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title">Fechas y Plazo</div>' +
-      dpRow('Fecha Adjudicación', p.fechaAdjudicacion) + dpRow('Fecha de Contrato', p.fechaContrato) +
-      dpRow('Plazo', p.plazo ? p.plazo+' días' : null) + dpRow('Fecha de Inicio', p.fechaInicio) + dpRow('Fecha de Finalización', p.fechaFinObra) +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title">Garantías</div>' +
-      (p.nFianzaAnticipo ? '<div style="background:var(--az7);border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--az2);font-size:10px;margin-bottom:2px">ANTICIPO</div>'+dpRow('N°',p.nFianzaAnticipo)+dpRow('Vigencia',p.iniFA+' → '+p.finFA)+dpRow('Monto','L '+fmtL(p.montoFianzaAnticipo))+'</div>' : '') +
-      (p.nFianzaCumplimiento ? '<div style="background:var(--verde-l);border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--verde);font-size:10px;margin-bottom:2px">CUMPLIMIENTO</div>'+dpRow('N°',p.nFianzaCumplimiento)+dpRow('Vigencia',p.iniFC+' → '+p.finFC)+dpRow('Monto','L '+fmtL(p.montoFianzaCumplimiento))+'</div>' : '') +
-      (p.nFianzaCalidad ? '<div style="background:#FDF3E3;border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--amarillo);font-size:10px;margin-bottom:2px">CALIDAD</div>'+dpRow('N°',p.nFianzaCalidad)+dpRow('Vigencia',p.iniFCal+' → '+p.finFCal)+dpRow('Monto','L '+fmtL(p.montoFianzaCalidad))+'</div>' : '') +
-      (!p.nFianzaAnticipo&&!p.nFianzaCumplimiento&&!p.nFianzaCalidad ? '<div style="font-size:11px;color:var(--gris3)">Sin garantías registradas</div>' : '') +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title">Información Financiera</div>' +
-      dpRow('Monto de Contrato', 'L '+fmtL(p.montoContratoInicial)) +
-      (p.montoModificacion ? dpRow('Modificación / Adenda','<span style="color:var(--amarillo)">L '+fmtL(p.montoModificacion)+'</span>') : '') +
-      dpRow('Total Devengado', 'L '+fmtL(p.totalDevengado)) +
-      dpRow('Deuda Pendiente', '<span style="color:'+(parseFloat(p.deuda)<0?'var(--rojo)':'inherit')+'">L '+fmtL(p.deuda)+'</span>') +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title">Avance del Proyecto</div>' +
-      '<div class="avance-block">' +
-        '<div class="avance-row"><div class="avance-label"><span>Avance Físico</span><span style="color:var(--az2);font-weight:500">'+af.toFixed(1)+'%</span></div><div class="avance-track"><div class="avance-fill" style="width:'+Math.min(af,100)+'%;background:var(--az3)"></div></div></div>' +
-        '<div class="avance-row"><div class="avance-label"><span>Avance Financiero <span style="font-size:9px;color:var(--gris3)">(calculado)</span></span><span style="color:var(--verde);font-weight:500">'+afin.toFixed(1)+'%</span></div><div class="avance-track"><div class="avance-fill" style="width:'+Math.min(afin,100)+'%;background:var(--verde)"></div></div></div>' +
-      '</div>' +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title">Pagos ('+(p.pagos||[]).length+')</div>' + pagosHtml + '</div>' +
-    '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>';
-
-  document.getElementById('detailOverlay').classList.add('open');
-}
-
-function dpRow(label, val) {
-  var v = (val === null || val === undefined || val === '') ? '—' : val;
-  return '<div class="dp-row"><span class="dl">'+label+'</span><span class="dv">'+v+'</span></div>';
-}
-
-function toggleHistDetail(id) {
-  var el = document.getElementById(id);
-  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
-function closeDetail(e) {
-  if (e && e.target !== document.getElementById('detailOverlay')) return;
-  document.getElementById('detailOverlay').classList.remove('open');
-}
-
-// ═══════════════════════════════════════════════════════════
-//  FORMULARIO — ABRIR
-// ═══════════════════════════════════════════════════════════
-// Variable global temporal para saber qué estamos registrando
-var currentRegType = 'construccion'; 
+// --- LÓGICA DE APERTURA DE FORMULARIO (PASO 1 Y 2) ---
 
 function openForm(u, idx) {
-  var proj = (idx !== null && idx !== undefined) ? (DB[u] || [])[idx] : null;
-  var perms = getPerms(u, proj);
-  
-  if (idx === null && !perms.canAdd) { showToast('No tiene permiso.', 'err'); return; }
-  if (idx !== null && !perms.canEdit) { showToast('No tiene permiso.', 'err'); return; }
+    var proj = (idx !== null && idx !== undefined) ? (DB[u] || [])[idx] : null;
+    editingId = { u: u, idx: idx };
 
-  editingId = { u: u, idx: idx };
-  
-  // Si es un proyecto nuevo, mostrar selector de tipo
-  if (idx === null) {
-    showTypeSelector(u);
-  } else {
-    // Si es edición, determinar tipo y abrir formulario directamente
-    currentRegType = proj.tipo_registro || 'construccion';
-    renderActualForm(u, proj);
-  }
-  
-  document.getElementById('modalOverlay').classList.add('open');
+    // Si es nuevo, mostramos el selector
+    if (idx === null) {
+        showTypeSelector(u);
+    } else {
+        // Si editamos, cargamos el tipo que ya tiene el proyecto
+        currentRegType = proj.tipo_registro || 'construccion';
+        renderFormByType(u, proj);
+    }
+    document.getElementById('modalOverlay').classList.add('open');
 }
 
-// Pantalla inicial de selección
 function showTypeSelector(u) {
-  document.getElementById('modalTitle').textContent = 'Nuevo Registro — ' + UNIDADES[u].nombre;
-  document.getElementById('modalBody').innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; padding:20px 0;">
-      <div class="selector-card" onclick="setRegType('construccion')">
-        <div class="selector-icon" style="background:var(--az6); color:var(--az2);">
-           <svg width="32" height="32" viewBox="0 0 16 16" fill="currentColor"><path d="M1 9l4-2 3 2 7-5V3H1v6z"/><path d="M1 10v3h14v-3l-7 5-3-2-4 2z"/></svg>
+    document.getElementById('modalTitle').textContent = 'Seleccione tipo de registro';
+    document.getElementById('modalFooter').style.display = 'none'; // Ocultar botones de guardado
+    document.getElementById('modalBody').innerHTML = `
+        <div class="selector-grid">
+            <div class="selector-card" onclick="startNewRegister('construccion')">
+                <div style="font-size:32px">🏗️</div>
+                <h4>Registrar Construcción</h4>
+                <p>Contratos de obra y mantenimiento vial.</p>
+            </div>
+            <div class="selector-card" onclick="startNewRegister('supervision')">
+                <div style="font-size:32px">📋</div>
+                <h4>Registrar Supervisión</h4>
+                <p>Contratos de supervisión externa de proyectos.</p>
+            </div>
         </div>
-        <h4>Registrar Construcción</h4>
-        <p>Proyectos de infraestructura vial y contratos de obra.</p>
-      </div>
-      <div class="selector-card" onclick="setRegType('supervision')">
-        <div class="selector-icon" style="background:var(--verde-l); color:var(--verde);">
-           <svg width="32" height="32" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12a5 5 0 110-10 5 5 0 010 10z"/><path d="M8 4a1 1 0 00-1 1v2H5a1 1 0 000 2h2v2a1 1 0 002 0V9h2a1 1 0 000-2H9V5a1 1 0 00-1-1z"/></svg>
+    `;
+}
+
+function startNewRegister(type) {
+    currentRegType = type;
+    document.getElementById('modalFooter').style.display = 'flex';
+    renderFormByType(editingId.u, null);
+}
+
+function renderFormByType(u, p) {
+    if (currentRegType === 'supervision') {
+        renderSupervisionForm(u, p);
+    } else {
+        renderConstruccionForm(u, p);
+    }
+}
+
+// FORMULARIO: CONSTRUCCIÓN
+function renderConstruccionForm(u, p) {
+    p = p || {};
+    var fv = (f) => (p[f] || '').toString().replace(/"/g, '&quot;');
+    document.getElementById('modalTitle').textContent = 'Registro de Construcción — ' + UNIDADES[u].nombre;
+    
+    // Obtener supervisiones registradas en esta unidad para el select
+    var sups = (DB[u] || []).filter(item => item.tipo_registro === 'supervision');
+    var supOptions = sups.map(s => `<option value="${s.noContrato}" ${p.noContratoSup === s.noContrato ? 'selected' : ''}>${s.supervisora} (Contrato: ${s.noContrato})</option>`).join('');
+
+    document.getElementById('modalBody').innerHTML = `
+        <div class="form-section">
+            <div class="form-section-title">Datos Generales de la Obra</div>
+            <div class="form-grid g2">
+                <div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="${fv('proyecto')}"/></div>
+                <div class="form-group"><label>N° Proceso <span class="req">*</span></label><input type="text" id="f_nProceso" value="${fv('nProceso')}"/></div>
+                <div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado">${ESTADOS.map(e=>`<option ${p.estado===e?'selected':''}>${e}</option>`).join('')}</select></div>
+            </div>
         </div>
-        <h4>Registrar Supervisión</h4>
-        <p>Contratos de supervisión externa para proyectos viales.</p>
-      </div>
-    </div>
-  `;
-}
-
-function setRegType(type) {
-  currentRegType = type;
-  renderActualForm(editingId.u, null);
-}
-
-function renderActualForm(u, p) {
-  if (currentRegType === 'supervision') {
-    renderFormSupervision(u, p);
-  } else {
-    renderFormConstruccion(u, p);
-  }
-}
-
-// --- FORMULARIO DE CONSTRUCCIÓN ---
-function renderFormConstruccion(u, p) {
-  p = p || {};
-  function fv(field) { return (p[field] || '').toString().replace(/"/g, '&quot;'); }
-  
-  document.getElementById('modalTitle').textContent = (p.proyecto ? 'Editar' : 'Nueva') + ' Construcción — ' + UNIDADES[u].nombre;
-  
-  // Obtener lista de contratos de supervisión ya registrados en esta unidad
-  var supervisionesDisponibles = (DB[u] || []).filter(proj => proj.tipo_registro === 'supervision');
-  var supOpts = supervisionesDisponibles.map(s => `<option value="${s._sid || s.proyecto}" ${p.id_supervision_vinculada === (s._sid || s.proyecto) ? 'selected' : ''}>${s.proyecto} (${s.noContrato || 'S/N'})</option>`).join('');
-
-  var html = `
-    <!-- Sección General y Ubicación (Igual que antes) -->
-    <div class="form-section">
-      <div class="form-section-title">Datos de Construcción</div>
-      <div class="form-grid g2">
-        <div class="form-group"><label>N° Proceso <span class="req">*</span></label><input type="text" id="f_nProceso" value="${fv('nProceso')}"/></div>
-        <div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()">${ESTADOS.map(e=>`<option ${p.estado===e?'selected':''}>${e}</option>`).join('')}</select></div>
-        <div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="${fv('proyecto')}"/></div>
-      </div>
-    </div>
-
-    <!-- Empresa Constructora -->
-    <div class="form-section">
-      <div class="form-section-title">Empresa Constructora</div>
-      <div class="form-grid g2">
-        <div class="form-group"><label>Constructora <span class="req">*</span></label>${empresaInput('f_constructora','constructora',fv('constructora'))}</div>
-        <div class="form-group"><label>N° Contrato Obra</label><input type="text" id="f_noContrato" value="${fv('noContrato')}"/></div>
-      </div>
-    </div>
-
-    <!-- NUEVA LÓGICA DE SUPERVISIÓN PARA CONSTRUCCIÓN -->
-    <div class="form-section">
-      <div class="form-section-title">Supervisión Vinculada</div>
-      <div style="display:flex; gap:10px; margin-bottom:12px;">
-        <label style="flex:1; border:1px solid var(--border); padding:10px; border-radius:6px; cursor:pointer;">
-          <input type="radio" name="f_tipoSupervision" value="interna" ${p.tipoSupervision === 'interna' ? 'checked' : ''} onchange="toggleSupConst('interna')"> Interna DGCV
-        </label>
-        <label style="flex:1; border:1px solid var(--border); padding:10px; border-radius:6px; cursor:pointer;">
-          <input type="radio" name="f_tipoSupervision" value="externa" ${p.tipoSupervision !== 'interna' ? 'checked' : ''} onchange="toggleSupConst('externa')"> Externa (Contrato)
-        </label>
-      </div>
-
-      <div id="sup-interna-fields" style="display:${p.tipoSupervision === 'interna' ? 'block' : 'none'}">
-        <div class="form-group"><label>Nombre del Supervisor de Campo DGCV <span class="req">*</span></label><input type="text" id="f_supervisor" value="${fv('supervisor')}"/></div>
-      </div>
-
-      <div id="sup-externa-fields" style="display:${p.tipoSupervision !== 'interna' ? 'block' : 'none'}">
-        <div class="form-group">
-          <label>Seleccionar Contrato de Supervisión Pre-registrado <span class="req">*</span></label>
-          <select id="f_id_supervision_vinculada">
-            <option value="">— Seleccione contrato de supervisión —</option>
-            ${supOpts}
-          </select>
-          <div class="form-hint">Si la empresa no aparece, regístrela primero como "Registro de Supervisión".</div>
+        <div class="form-section">
+            <div class="form-section-title">Empresa Constructora</div>
+            <div class="form-grid g2">
+                <div class="form-group"><label>Constructora <span class="req">*</span></label>${empresaInput('f_constructora','constructora',fv('constructora'))}</div>
+                <div class="form-group"><label>N° Contrato Obra <span class="req">*</span></label><input type="text" id="f_noContrato" value="${fv('noContrato')}"/></div>
+            </div>
         </div>
-      </div>
-    </div>
-  `;
-  
-  // Aquí concatenas el resto del formulario (Fechas, Garantías, Pagos) que ya tenías
-  document.getElementById('modalBody').innerHTML = html + getCommonFields(p);
-  initFormFeatures(p);
+        <div class="form-section">
+            <div class="form-section-title">Supervisión</div>
+            <div class="form-grid g2" style="margin-bottom:10px">
+                <div class="form-group"><label>Tipo de Supervisión</label>
+                    <select id="f_tipoSupervision" onchange="toggleSupervisionFields(this.value)">
+                        <option value="interna" ${p.tipoSupervision === 'interna' ? 'selected' : ''}>Supervisión Interna (DGCV)</option>
+                        <option value="externa" ${p.tipoSupervision === 'externa' ? 'selected' : ''}>Supervisión Externa</option>
+                    </select>
+                </div>
+            </div>
+            <div id="fields_sup_interna" style="display:${p.tipoSupervision === 'externa' ? 'none' : 'block'}">
+                <div class="form-group"><label>Nombre del Supervisor de Campo <span class="req">*</span></label><input type="text" id="f_supervisor" value="${fv('supervisor')}"/></div>
+            </div>
+            <div id="fields_sup_externa" style="display:${p.tipoSupervision === 'externa' ? 'block' : 'none'}">
+                <div class="form-group"><label>Seleccione Contrato de Supervisión Pre-registrado <span class="req">*</span></label>
+                    <select id="f_noContratoSup">
+                        <option value="">— Seleccione contrato —</option>
+                        ${supOptions}
+                    </select>
+                </div>
+            </div>
+        </div>
+        ${renderCommonFields(p)}
+    `;
+    initFormLogic(p);
 }
 
-// --- FORMULARIO DE SUPERVISIÓN ---
-function renderFormSupervision(u, p) {
-  p = p || {};
-  function fv(field) { return (p[field] || '').toString().replace(/"/g, '&quot;'); }
+// FORMULARIO: SUPERVISIÓN
+function renderSupervisionForm(u, p) {
+    p = p || {};
+    var fv = (f) => (p[f] || '').toString().replace(/"/g, '&quot;');
+    document.getElementById('modalTitle').textContent = 'Registro de Supervisión — ' + UNIDADES[u].nombre;
 
-  document.getElementById('modalTitle').textContent = (p.proyecto ? 'Editar' : 'Nueva') + ' Supervisión — ' + UNIDADES[u].nombre;
-
-  document.getElementById('modalBody').innerHTML = `
-    <div class="form-section">
-      <div class="form-section-title">Datos del Contrato de Supervisión</div>
-      <div class="form-grid g2">
-        <div class="form-group span2"><label>Nombre del Proyecto de Supervisión <span class="req">*</span></label><input type="text" id="f_proyecto" value="${fv('proyecto')}" placeholder="Ej: Supervisión de la Red Vial..."/></div>
-        <div class="form-group"><label>Empresa Supervisora <span class="req">*</span></label>${empresaInput('f_supervisora','supervisora',fv('supervisora'))}</div>
-        <div class="form-group"><label>N° Contrato Supervisión <span class="req">*</span></label><input type="text" id="f_noContrato" value="${fv('noContrato')}"/></div>
-        <div class="form-group span2"><label>Contratos a los que supervisa <span class="req">*</span></label><input type="text" id="f_contratosSupervisa" value="${fv('contratosSupervisa')}" placeholder="Indique los códigos de contratos de obra"/></div>
-        <div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado">${ESTADOS.map(e=>`<option ${p.estado===e?'selected':''}>${e}</option>`).join('')}</select></div>
-      </div>
-    </div>
-  ` + getCommonFields(p);
-  
-  initFormFeatures(p);
+    document.getElementById('modalBody').innerHTML = `
+        <div class="form-section">
+            <div class="form-section-title">Datos del Contrato de Supervisión</div>
+            <div class="form-grid g2">
+                <div class="form-group span2"><label>Nombre del Proyecto de Supervisión <span class="req">*</span></label><input type="text" id="f_proyecto" value="${fv('proyecto')}"/></div>
+                <div class="form-group"><label>Empresa Supervisora <span class="req">*</span></label>${empresaInput('f_supervisora','supervisora',fv('supervisora'))}</div>
+                <div class="form-group"><label>N° Contrato Supervisión <span class="req">*</span></label><input type="text" id="f_noContrato" value="${fv('noContrato')}"/></div>
+                <div class="form-group span2"><label>Contratos a los que supervisa <span class="req">*</span></label><input type="text" id="f_contratosSupervisa" value="${fv('contratosSupervisa')}" placeholder="Ej: Contrato 001-2025, 045-2025..."/></div>
+            </div>
+        </div>
+        ${renderCommonFields(p)}
+    `;
+    initFormLogic(p);
 }
 
-function toggleSupConst(tipo) {
-  document.getElementById('sup-interna-fields').style.display = tipo === 'interna' ? 'block' : 'none';
-  document.getElementById('sup-externa-fields').style.display = tipo === 'externa' ? 'block' : 'none';
+// CAMPOS COMUNES (Ubicación, Fechas, Financiero)
+function renderCommonFields(p) {
+    var fv = (f) => (p[f] || '').toString().replace(/"/g, '&quot;');
+    return `
+        <div class="form-section">
+            <div class="form-section-title">Ubicación</div>
+            <div class="form-grid g3">
+                <div class="form-group"><label>Departamento</label><select id="f_departamento">${DEPTOS.map(d=>`<option ${p.departamento===d?'selected':''}>${d}</option>`).join('')}</select></div>
+                <div class="form-group"><label>Municipio</label><input type="text" id="f_municipio" value="${fv('municipio')}"/></div>
+                <div class="form-group"><label>Aldea/Barrio</label><input type="text" id="f_aldeaBarrio" value="${fv('aldeaBarrio')}"/></div>
+            </div>
+        </div>
+        <div class="form-section">
+            <div class="form-section-title">Información Financiera y Avance</div>
+            <div class="form-grid g2">
+                <div class="form-group"><label>Monto Contrato (L)</label><input type="number" id="f_montoContratoInicial" value="${fv('montoContratoInicial')}" oninput="recalcPagos()"/></div>
+                <div class="form-group"><label>Avance Físico (%)</label><input type="number" id="f_avanceFisico" value="${fv('avanceFisico')}" min="0" max="100"/></div>
+            </div>
+            <div id="pagos-container" style="margin-top:15px"></div>
+            <button class="add-row-btn" onclick="addPago()">+ Agregar Pago</button>
+        </div>
+    `;
 }
 
-// Función auxiliar para no repetir campos de fechas, garantías y pagos
-function getCommonFields(p) {
-  // Aquí mueves el HTML de Ubicación, Fechas, Garantías y Pagos que ya tenías en tu código original
-  // Retorna el string de HTML
-  return ""; // [Copia aquí el bloque de HTML de ubicación, fechas, garantías y financiero del script original]
+// --- AUXILIARES ---
+
+function toggleSupervisionFields(val) {
+    document.getElementById('fields_sup_interna').style.display = (val === 'interna') ? 'block' : 'none';
+    document.getElementById('fields_sup_externa').style.display = (val === 'externa') ? 'block' : 'none';
 }
 
-function initFormFeatures(p) {
-    // Inicia endosos, pagos y barras de progreso
-    (p.endosos || []).forEach(e => addEndoso(e));
+function initFormLogic(p) {
+    p = p || {};
     (p.pagos || []).forEach(pg => addPago(pg));
-    recalcPagos();
+    if (!(p.pagos || []).length) addPago();
 }
-// ═══════════════════════════════════════════════════════════
-//  FORMULARIO — GUARDAR
-// ═══════════════════════════════════════════════════════════
-function saveProject() {
-  var u   = editingId.u;
-  var idx = editingId.idx;
-  function g(id) { var el = document.getElementById(id); return el ? el.value : ''; }
 
-  // Validación — 13 campos obligatorios
-  var errs = [];
-  if (!g('f_nProceso'))          errs.push('N° Proceso de Contratación');
-  if (!g('f_estado'))            errs.push('Estado del Proyecto');
-  if (!g('f_proyecto'))          errs.push('Nombre del Proyecto');
-  if (!g('f_descripcion'))       errs.push('Descripción / Alcance');
-  if (!g('f_longitud'))          errs.push('Longitud (km)');
-  if (!g('f_departamento'))      errs.push('Departamento');
-  if (!g('f_municipio'))         errs.push('Municipio');
-  if (!g('f_aldeaBarrio'))       errs.push('Aldea / Barrio / Caserío');
-  if (!g('f_latitud'))           errs.push('Latitud GPS');
-  if (!g('f_longitudRef'))       errs.push('Longitud GPS');
-  if (!g('f_constructora'))      errs.push('Empresa Constructora');
-  if (!g('f_coordinador'))       errs.push('Nombre del Coordinador');
-  if (!g('f_supervisor'))        errs.push('Supervisor de Campo');
-  if (!g('f_fechaAdjudicacion')) errs.push('Fecha de Adjudicación');
-  var avF = parseFloat(g('f_avanceFisico'));
-  if (g('f_avanceFisico') === '' || isNaN(avF) || avF < 0 || avF > 100) errs.push('Avance Físico (0–100%)');
-  if (errs.length) {
-    showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err');
-    // Highlight missing fields visually
-    ['f_nProceso','f_estado','f_proyecto','f_descripcion','f_longitud',
-     'f_departamento','f_municipio','f_aldeaBarrio','f_latitud','f_longitudRef',
-     'f_constructora','f_coordinador','f_supervisor','f_fechaAdjudicacion','f_avanceFisico'
-    ].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (!el) return;
-      var empty = (id === 'f_avanceFisico')
-        ? (el.value === '' || isNaN(parseFloat(el.value)) || parseFloat(el.value) < 0 || parseFloat(el.value) > 100)
-        : !el.value;
-      el.style.borderColor = empty ? 'var(--rojo)' : '';
-      el.style.background  = empty ? 'var(--rojo-l)' : '';
-      if (empty) {
-        el.addEventListener('input', function fix() {
-          el.style.borderColor = ''; el.style.background = '';
-          el.removeEventListener('input', fix);
-        });
-      }
+function empresaInput(id, tipo, valor) {
+    var lista = tipo === 'supervisora' ? EMPRESAS.supervisoras : EMPRESAS.constructoras;
+    var opts = lista.map(e => `<option value="${e.nombre.replace(/"/g,'&quot;')}">`).join('');
+    return `<input type="text" id="${id}" value="${valor}" list="dl-${id}" placeholder="Escriba..." autocomplete="off"/><datalist id="dl-${id}">${opts}</datalist>`;
+}
+
+function addPago(data) {
+    data = data || {};
+    var n = document.querySelectorAll('.pago-card').length + 1;
+    var div = document.createElement('div');
+    div.className = 'pago-card';
+    div.style = "background:var(--gris6); padding:10px; border-radius:6px; margin-bottom:10px; border:1px solid var(--border)";
+    div.innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px">
+            <span style="font-size:10px; font-weight:bold">PAGO N° ${n}</span>
+            <button onclick="this.parentElement.parentElement.remove(); recalcPagos()" style="background:none; border:none; color:var(--rojo); cursor:pointer">✕</button>
+        </div>
+        <div class="form-grid g2">
+            <div class="form-group"><label>Monto (L)</label><input type="number" class="pago-monto" value="${data.monto || ''}" oninput="recalcPagos()"/></div>
+            <div class="form-group"><label>Fecha</label><input type="date" class="pago-fecha" value="${data.fechaIngreso || ''}"/></div>
+        </div>
+    `;
+    document.getElementById('pagos-container').appendChild(div);
+}
+
+function recalcPagos() {
+    // Aquí puedes añadir la lógica de suma si quieres mostrar un totalizador en el modal
+}
+
+// --- GUARDAR ---
+
+async function saveProject() {
+    var u = editingId.u;
+    var idx = editingId.idx;
+    var g = (id) => { var el = document.getElementById(id); return el ? el.value : ''; };
+
+    // Recolectar pagos
+    var pagos = [];
+    document.querySelectorAll('.pago-card').forEach(card => {
+        var m = card.querySelector('.pago-monto').value;
+        if(m) pagos.push({ monto: m, fechaIngreso: card.querySelector('.pago-fecha').value });
     });
-    return;
-  }
 
-  var tipoSup = (document.querySelector('[name="tipoSup"]:checked') || {}).value || 'externa';
-
-  // Recolectar endosos
-  var endosos = [];
-  document.querySelectorAll('#endosos-container .endoso-card').forEach(function(card) {
-    var e = {
-      numEndoso:         (card.querySelector('.end-num')            ||{}).value||'',
-      fianzaVinculada:   (card.querySelector('.endoso-fianza-select')||{}).value||'',
-      fechaEndoso:       (card.querySelector('.end-fecha')          ||{}).value||'',
-      nuevaFechaVenc:    (card.querySelector('.end-fechaVenc')       ||{}).value||'',
-      montoEndoso:       (card.querySelector('.end-monto')          ||{}).value||'',
-      descripcionEndoso: (card.querySelector('.end-desc')           ||{}).value||''
+    var proj = {
+        tipo_registro: currentRegType,
+        proyecto: g('f_proyecto'),
+        nProceso: g('f_nProceso'),
+        estado: g('f_estado'),
+        departamento: g('f_departamento'),
+        municipio: g('f_municipio'),
+        aldeaBarrio: g('f_aldeaBarrio'),
+        montoContratoInicial: g('f_montoContratoInicial'),
+        avanceFisico: g('f_avanceFisico'),
+        pagos: pagos,
+        _unidad: u
     };
-    if (e.numEndoso || e.fianzaVinculada) endosos.push(e);
-  });
 
-  // Recolectar pagos
-  var pagos = [];
-  document.querySelectorAll('#pagos-container .pago-card').forEach(function(card) {
-    var pg = {
-      monto:        (card.querySelector('.pago-monto')       ||{}).value||'',
-      fechaIngreso: (card.querySelector('.pago-fechaIngreso')||{}).value||'',
-      periodoIni:   (card.querySelector('.pago-periodoIni')  ||{}).value||'',
-      periodoFin:   (card.querySelector('.pago-periodoFin')  ||{}).value||'',
-      contexto:     (card.querySelector('.pago-ctx')         ||{}).value||''
-    };
-    if (pg.monto) pagos.push(pg);
-  });
-
-  // Calcular totales
-  var mI  = parseFloat(g('f_montoContratoInicial')) || 0;
-  var mM  = parseFloat(g('f_montoModificacion'))    || 0;
-  var vig = mM > 0 ? mM : mI;
-  var dev = pagos.reduce(function(a,pg) { return a + (parseFloat(pg.monto)||0); }, 0);
-  var avFin = vig > 0 ? parseFloat((dev/vig*100).toFixed(2)) : 0;
-
-  // Historial
-  var prevProj = idx !== null ? DB[u][idx] : null;
-  var cambios  = [];
-  if (prevProj) {
-    var campos = { proyecto:'Nombre',estado:'Estado',constructora:'Constructora',departamento:'Dpto',avanceFisico:'Av. Físico',montoContratoInicial:'Monto Contrato' };
-    Object.keys(campos).forEach(function(k) {
-      var prev = String(prevProj[k]||'');
-      var curr = g('f_'+k);
-      if (prev !== curr) cambios.push(campos[k]+': "'+prev+'" → "'+curr+'"');
-    });
-    if ((prevProj.pagos||[]).length !== pagos.length) cambios.push('Pagos: '+(prevProj.pagos||[]).length+' → '+pagos.length);
-    if ((prevProj.endosos||[]).length !== endosos.length) cambios.push('Endosos: '+(prevProj.endosos||[]).length+' → '+endosos.length);
-    if (!cambios.length) cambios.push('Sin cambios detectados en campos principales');
-  } else {
-    cambios.push('Proyecto creado · '+pagos.length+' pago(s) · '+endosos.length+' endoso(s)');
-  }
-
-  var histEntry = {
-    fecha:   new Date().toISOString(),
-    usuario: currentUser.nombre,
-    unidad:  currentUser.rol,
-    accion:  prevProj ? 'Actualización' : 'Creación',
-    cambios: cambios
-  };
-
-  var proj = {
-    nProceso:       g('f_nProceso'),
-    proyecto:       g('f_proyecto'),
-    descripcion:    g('f_descripcion'),
-    estado:         g('f_estado'),
-    longitud:       g('f_longitud'),
-    beneficiarios:  g('f_beneficiarios'),
-    empleadosDirectos:   g('f_empleadosDirectos'),
-    empleadosIndirectos: g('f_empleadosIndirectos'),
-    departamento:   g('f_departamento'),
-    municipio:      g('f_municipio'),
-    aldeaBarrio:    g('f_aldeaBarrio'),
-    latitud:        g('f_latitud'),
-    longitudRef:    g('f_longitudRef'),
-    constructora:   g('f_constructora'),
-    noContrato:     g('f_noContrato'),
-    coordinador:    g('f_coordinador'),
-    supervisor:     g('f_supervisor'),
-    tipoSupervision: tipoSup,
-    supervisora:    tipoSup==='externa' ? g('f_supervisora')       : 'Supervisión Interna DGCV',
-    noContratoSup:  tipoSup==='externa' ? g('f_noContratoSup')     : '',
-    contratosSupervisa: tipoSup==='externa' ? g('f_contratosSupervisa') : '',
-    fechaAdjudicacion: g('f_fechaAdjudicacion'),
-    fechaContrato:  g('f_fechaContrato'),
-    plazo:          g('f_plazo'),
-    fechaInicio:    g('f_fechaInicio'),
-    fechaFinObra:   g('f_fechaFinObra'),
-    nFianzaAnticipo:     g('f_nFianzaAnticipo'),    iniFA:  g('f_iniFA'),   finFA:  g('f_finFA'),   montoFianzaAnticipo:     g('f_montoFianzaAnticipo'),
-    nFianzaCumplimiento: g('f_nFianzaCumplimiento'),iniFC:  g('f_iniFC'),   finFC:  g('f_finFC'),   montoFianzaCumplimiento: g('f_montoFianzaCumplimiento'),
-    nFianzaCalidad:      g('f_nFianzaCalidad'),     iniFCal:g('f_iniFCal'), finFCal:g('f_finFCal'), montoFianzaCalidad:      g('f_montoFianzaCalidad'),
-    endosos:        endosos,
-    montoContratoInicial: g('f_montoContratoInicial'),
-    montoModificacion:    g('f_montoModificacion'),
-    avanceFisico:   g('f_avanceFisico'),
-    avanceFinanciero: String(avFin),
-    pagos:          pagos,
-    totalDevengado: dev.toFixed(2),
-    deuda:          (vig - dev).toFixed(2),
-    historial:      (prevProj ? (prevProj.historial || []) : []).concat([histEntry]),
-    _saved:         new Date().toISOString(),
-    _unidad:        u,
-    _sid:           prevProj ? prevProj._sid : undefined
-  };
-
-  // Update local cache first
-  if (idx === null) DB[u].push(proj);
-  else DB[u][idx] = proj;
-
-  closeModal();
-  updateBadges();
-  endosoCount = 0; pagoCount = 0;
-
-  // Navigate to unidad list immediately
-  var isNew = idx === null;
-  showView(u, document.getElementById('nav-' + u));
-  showBanner(isNew ? '✓ Proyecto "' + proj.proyecto.slice(0,40) + '" registrado exitosamente' : '✓ Proyecto actualizado correctamente');
-
-  // Save to Supabase (async — no bloquea la UI)
-  persistirProyecto(u, proj)
-    .then(function(newId) {
-      if (isNew) {
-        var localIdx = DB[u].length - 1;
-        if (DB[u][localIdx] && !DB[u][localIdx]._sid) {
-          DB[u][localIdx]._sid = newId;
-          proj._sid = newId;
+    if (currentRegType === 'construccion') {
+        proj.constructora = g('f_constructora');
+        proj.noContrato = g('f_noContrato');
+        proj.tipoSupervision = g('f_tipoSupervision');
+        if (proj.tipoSupervision === 'interna') {
+            proj.supervisor = g('f_supervisor');
+        } else {
+            proj.noContratoSup = g('f_noContratoSup');
+            // Buscamos el nombre de la empresa supervisora vinculada para guardarlo
+            var supObj = (DB[u]||[]).find(s => s.noContrato === proj.noContratoSup);
+            proj.supervisora = supObj ? supObj.supervisora : 'Externa';
         }
-      }
-      saveLocalDB();
-      showToast('✓ Guardado en base de datos Supabase.', 'ok');
-    })
-    .catch(function(e) {
-      saveLocalDB();
-      // Mostrar error completo en pantalla para diagnóstico
-      var msg = 'Error al guardar en BD: ' + e.message;
-      showToast(msg, 'err');
-      // También mostrar en alerta para que sea imposible de ignorar
-      setTimeout(function() { alert('⚠️ ' + msg + '\n\nEl proyecto quedó guardado localmente pero NO en Supabase.\nRevise la conexión.'); }, 500);
-    });
-}
-
-// ═══════════════════════════════════════════════════════════
-//  ELIMINAR PROYECTO
-// ═══════════════════════════════════════════════════════════
-function deleteProject(u, i) {
-  var proj = DB[u][i];
-  if (!proj) return;
-  var perms = getPerms(u, proj);
-  if (!perms.canDelete) { showToast('No tiene permiso para eliminar este proyecto.', 'err'); return; }
-  if (!confirm('¿Confirma eliminar "' + proj.proyecto + '"?\nEsta acción no se puede deshacer.')) return;
-  var sid = proj._sid;
-  DB[u].splice(i, 1);
-  saveLocalDB();
-  updateBadges();
-  renderUnidad(u);
-  showToast('Proyecto eliminado.', 'ok');
-  if (sid) {
-    supaDelete('proyectos', sid).catch(function(e) {
-      showToast('Eliminado localmente pero error en BD: ' + e.message, 'err');
-    });
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-//  MODALES — CERRAR
-// ═══════════════════════════════════════════════════════════
-function closeModal(e) {
-  if (e && e.target !== document.getElementById('modalOverlay')) return;
-  document.getElementById('modalOverlay').classList.remove('open');
-  editingId = null; endosoCount = 0; pagoCount = 0;
-}
-function closeDetail(e) {
-  if (e && e.target !== document.getElementById('detailOverlay')) return;
-  document.getElementById('detailOverlay').classList.remove('open');
-}
-
-// ═══════════════════════════════════════════════════════════
-//  RECARGAR DESDE SUPABASE
-// ═══════════════════════════════════════════════════════════
-function recargarDesdeSupabase() {
-  var btn = document.getElementById('syncBtn');
-  if (btn) { btn.textContent = 'Cargando...'; btn.disabled = true; }
-  cargarProyectos().then(function() {
-    saveLocalDB();
-    updateBadges();
-    if (currentView === 'dashboard') renderDashboard();
-    else renderUnidad(currentView);
-    if (btn) { btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M10 6A4 4 0 116 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/><path d="M6 2l2-2M6 2L4 0" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Recargar datos'; btn.disabled = false; }
-    showToast(dbOnline ? 'Datos actualizados desde la base de datos.' : 'Sin conexión a la base de datos.', dbOnline ? 'ok' : 'err');
-  });
-}
-
-// ═══════════════════════════════════════════════════════════
-//  GESTIÓN DE USUARIOS (solo admin)
-// ═══════════════════════════════════════════════════════════
-function renderUsuariosPanel() {
-  if (!currentUser || !currentUser.esGlobalAdmin) {
-    document.getElementById('mainContent').innerHTML = '<div class="empty-state"><svg viewBox="0 0 36 36" fill="none" style="width:36px;margin:0 auto 12px;display:block;opacity:.3"><circle cx="18" cy="18" r="16" stroke="currentColor" stroke-width="1.5"/><path d="M12 18l4 4 8-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><p>Acceso restringido — Solo el Administrador General puede gestionar usuarios.</p></div>';
-    return;
-  }
-  var mc = document.getElementById('mainContent');
-  mc.innerHTML = '<div class="page-header"><h2>Gestión de Usuarios</h2><p>Administre los accesos al sistema por unidad.</p>' +
-    '<div class="page-actions"><button class="btn btn-primary" onclick="abrirModalUsuario()">+ Nuevo Usuario</button></div></div>' +
-    '<div class="table-wrap"><div class="table-toolbar"><h3>Usuarios registrados</h3></div>' +
-    '<div id="tablaUsuarios"><div class="empty-state"><p>Cargando...</p></div></div></div>';
-  cargarTablaUsuarios();
-}
-
-async function cargarTablaUsuarios() {
-  try {
-    var rows = await supaGet('usuarios', 'select=*&order=unidad.asc,nombre.asc');
-    var tbody = '';
-    (rows || []).forEach(function(u, i) {
-      var estadoPill = u.activo
-        ? '<span class="pill ejec">Activo</span>'
-        : '<span class="pill susp">Inactivo</span>';
-      tbody += '<tr>' +
-        '<td><strong>' + u.username + '</strong></td>' +
-        '<td>' + u.nombre + '</td>' +
-        '<td>' + (UNIDAD_NOMBRES[u.unidad] || u.unidad) + '</td>' +
-        '<td>' + (u.rol === 'admin' ? 'Administrador' : 'Coordinador') + '</td>' +
-        '<td>' + estadoPill + '</td>' +
-        '<td><div class="tbl-actions">' +
-          '<button class="tbl-btn edit" onclick="abrirModalUsuario(\'' + u.id + '\')">Editar</button>' +
-          '<button class="tbl-btn" onclick="cambiarEstadoUsuario(\'' + u.id + '\',' + !u.activo + ')">' + (u.activo ? 'Desactivar' : 'Activar') + '</button>' +
-          '<button class="tbl-btn" style="color:var(--rojo)" onclick="cambiarPasswordUsuario(\'' + u.id + '\',\'' + u.username + '\')">Cambiar contraseña</button>' +
-        '</div></td>' +
-      '</tr>';
-    });
-    document.getElementById('tablaUsuarios').innerHTML =
-      '<table class="tbl"><thead><tr>' +
-        '<th>Usuario</th><th>Nombre</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Acciones</th>' +
-      '</tr></thead><tbody>' + tbody + '</tbody></table>';
-  } catch(e) {
-    document.getElementById('tablaUsuarios').innerHTML = '<div class="empty-state"><p>Error al cargar usuarios: ' + e.message + '</p></div>';
-  }
-}
-
-function abrirModalUsuario(id) {
-  var esEdicion = !!id;
-  var body = '<div class="form-section">' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Nombre completo <span class="req">*</span></label>' +
-        '<input type="text" id="u_nombre" placeholder="Ej: Juan Pérez"/></div>' +
-      '<div class="form-group"><label>Nombre de usuario <span class="req">*</span></label>' +
-        '<input type="text" id="u_username" placeholder="Ej: jperez" ' + (esEdicion ? 'readonly style="background:var(--gris6)"' : '') + '/></div>' +
-    '</div>' +
-    '<div class="form-grid g2" style="margin-top:12px">' +
-      '<div class="form-group"><label>Unidad <span class="req">*</span></label>' +
-        '<select id="u_unidad">' +
-          '<option value="">— Seleccione —</option>' +
-          Object.entries(UNIDAD_NOMBRES).map(function(e){ return '<option value="'+e[0]+'">'+e[1]+'</option>'; }).join('') +
-        '</select></div>' +
-      '<div class="form-group"><label>Rol <span class="req">*</span></label>' +
-        '<select id="u_rol"><option value="coordinador">Coordinador</option><option value="admin">Administrador</option></select></div>' +
-    '</div>' +
-    (!esEdicion ? '<div class="form-grid g2" style="margin-top:12px">' +
-      '<div class="form-group"><label>Contraseña <span class="req">*</span></label>' +
-        '<input type="password" id="u_pass" placeholder="Mínimo 6 caracteres"/></div>' +
-      '<div class="form-group"><label>Confirmar contraseña <span class="req">*</span></label>' +
-        '<input type="password" id="u_pass2" placeholder="Repita la contraseña"/></div>' +
-    '</div>' : '') +
-  '</div>';
-
-  // Reutilizar modal principal
-  document.getElementById('modalTitle').textContent = esEdicion ? 'Editar Usuario' : 'Nuevo Usuario';
-  document.getElementById('modalBody').innerHTML = body;
-  document.getElementById('modalOverlay').classList.add('open');
-
-  // Sobrescribir temporalmente el botón guardar
-  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
-  btnGuardar.onclick = function() { guardarUsuario(id); };
-
-  // Si es edición, cargar datos actuales
-  if (esEdicion) {
-    supaGet('usuarios', 'select=*&id=eq.' + id).then(function(rows) {
-      if (!rows || !rows[0]) return;
-      var u = rows[0];
-      document.getElementById('u_nombre').value   = u.nombre;
-      document.getElementById('u_username').value = u.username;
-      document.getElementById('u_unidad').value   = u.unidad;
-      document.getElementById('u_rol').value      = u.rol;
-    });
-  }
-}
-
-async function guardarUsuario(id) {
-  var nombre   = (document.getElementById('u_nombre').value || '').trim();
-  var username = (document.getElementById('u_username').value || '').trim().toLowerCase();
-  var unidad   = document.getElementById('u_unidad').value;
-  var rol      = document.getElementById('u_rol').value;
-  var esEdicion = !!id;
-
-  if (!nombre || !username || !unidad) {
-    showToast('Complete los campos obligatorios.', 'err');
-    return;
-  }
-
-  var rowData = { nombre: nombre, username: username, unidad: unidad, rol: rol };
-
-  if (!esEdicion) {
-    var pass  = document.getElementById('u_pass').value;
-    var pass2 = document.getElementById('u_pass2').value;
-    if (!pass || pass.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', 'err'); return; }
-    if (pass !== pass2)           { showToast('Las contraseñas no coinciden.', 'err'); return; }
-    rowData.password = await sha256hex(pass);
-    rowData.activo   = true;
-  }
-
-  try {
-    if (esEdicion) {
-      await supaPatch('usuarios', id, rowData);
-      showToast('Usuario actualizado correctamente.', 'ok');
     } else {
-      var newId = genUUID();
-      rowData.id = newId;
-      await supaPost('usuarios', rowData);
-      showToast('Usuario creado. Puede iniciar sesión de inmediato.', 'ok');
+        proj.supervisora = g('f_supervisora');
+        proj.noContrato = g('f_noContrato');
+        proj.contratosSupervisa = g('f_contratosSupervisa');
     }
-    closeModal();
-    // Restaurar onclick del botón guardar al original
-    document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
-    renderUsuariosPanel();
-  } catch(e) {
-    showToast('Error al guardar: ' + e.message, 'err');
-  }
-}
 
-async function cambiarEstadoUsuario(id, nuevoEstado) {
-  var accion = nuevoEstado ? 'activar' : 'desactivar';
-  if (!confirm('¿Confirma ' + accion + ' este usuario?')) return;
-  try {
-    await supaPatch('usuarios', id, { activo: nuevoEstado });
-    showToast('Usuario ' + (nuevoEstado ? 'activado' : 'desactivado') + '.', 'ok');
-    cargarTablaUsuarios();
-  } catch(e) {
-    showToast('Error: ' + e.message, 'err');
-  }
-}
+    // Guardar Local
+    if (idx === null) DB[u].push(proj);
+    else DB[u][idx] = Object.assign(DB[u][idx], proj);
 
-async function cambiarPasswordUsuario(id, username) {
-  var newPass = prompt('Nueva contraseña para "' + username + '" (mínimo 6 caracteres):');
-  if (!newPass) return;
-  if (newPass.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', 'err'); return; }
-  try {
-    var hash = await sha256hex(newPass);
-    await supaPatch('usuarios', id, { password: hash });
-    showToast('Contraseña actualizada para ' + username + '.', 'ok');
-  } catch(e) {
-    showToast('Error: ' + e.message, 'err');
-  }
-}
-
-
-// ═══════════════════════════════════════════════════════════
-//  FORMATOS — links a Google Drive
-// ═══════════════════════════════════════════════════════════
-// Para actualizar los links: reemplace el valor de 'url' en cada formato.
-// Comparta la carpeta/archivo en Drive como "Cualquiera con el enlace puede ver"
-// y copie el link aquí.
-var FORMATOS_CONFIG = [
-  {
-    id:          'estimacion',
-    titulo:      'Estimación de Obras',
-    descripcion: 'Formato oficial para el trámite y presentación de estimaciones de avance de obras. Incluye desglose por partidas, cantidades ejecutadas y montos correspondientes.',
-    clase:       'estimacion',
-    iconoBg:     'var(--az7)',
-    iconoColor:  'var(--az2)',
-    btnClase:    'az',
-    badge:       'Obras Civiles',
-    badgeBg:     'var(--az7)',
-    badgeColor:  'var(--az2)',
-    url:         'https://drive.google.com/drive/folders/1zu3ZU46QQVdIZnWWkdgNi265RkWCEwNs?usp=sharing',   // ← Pegue aquí el link de Google Drive
-    icono: '<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="2" width="18" height="24" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M4 2l6 6H4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M4 8h6V2" stroke="currentColor" stroke-width="1.4"/><path d="M8 14h10M8 18h10M8 22h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><rect x="18" y="18" width="10" height="10" rx="2" fill="var(--az6)" stroke="var(--az3)" stroke-width="1.3"/><path d="M21 23h4M23 21v4" stroke="var(--az2)" stroke-width="1.3" stroke-linecap="round"/></svg>'
-  },
-  {
-    id:          'supervision',
-    titulo:      'Pago a Supervisores',
-    descripcion: 'Formato para solicitud y tramitación de pagos a empresas supervisoras externas. Incluye período de supervisión, porcentaje de avance verificado y monto a pagar.',
-    clase:       'supervision',
-    iconoBg:     'var(--verde-l)',
-    iconoColor:  'var(--verde)',
-    btnClase:    'verde',
-    badge:       'Supervisión',
-    badgeBg:     'var(--verde-l)',
-    badgeColor:  'var(--verde)',
-    url:         'https://drive.google.com/drive/folders/1Q5QjuCpcjeuLCFoyUBzICHxYftXml3ow?usp=sharing',   // ← Pegue aquí el link de Google Drive
-    icono: '<svg viewBox="0 0 32 32" fill="none"><circle cx="13" cy="10" r="5" stroke="currentColor" stroke-width="1.6"/><path d="M4 26c0-5 4-8 9-8s9 3 9 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M21 14l2.5 2.5L28 12" stroke="var(--verde)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="14" r="6" stroke="var(--verde)" stroke-width="1.4"/></svg>'
-  },
-  {
-    id:          'anticipo',
-    titulo:      'Anticipo de Obra',
-    descripcion: 'Formato para la solicitud de anticipo de contrato. Incluye datos del proyecto, monto total, porcentaje de anticipo solicitado y documentos de garantía requeridos.',
-    clase:       'anticipo',
-    iconoBg:     'var(--gold6)',
-    iconoColor:  'var(--gold1)',
-    btnClase:    'gold',
-    badge:       'Financiero',
-    badgeBg:     'var(--gold6)',
-    badgeColor:  'var(--gold1)',
-    url:         'https://drive.google.com/drive/folders/1eobYZ5RF4ZxxUHFpB9FTh-7S8QzvbBi-?usp=sharing',   // ← Pegue aquí el link de Google Drive
-    icono: '<svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="12" stroke="currentColor" stroke-width="1.6"/><path d="M16 8v2M16 22v2M12 12.5c0-1.7 1.3-3 4-3s4 1.3 4 3-1.5 2.5-4 3-4 1.5-4 3 1.3 3 4 3 4-1.3 4-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
-  }
-];
-
-function renderFormatosPanel() {
-  var tarjetas = FORMATOS_CONFIG.map(function(f) {
-    var disponible = f.url && f.url !== 'PENDIENTE';
-    var btnHtml = disponible
-      ? '<a href="'+f.url+'" target="_blank" rel="noopener" class="btn-formato '+f.btnClase+'">'
-          +'<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3l4 4-4 4" stroke="white" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-          +'Abrir en Google Drive</a>'
-      : '<button class="btn-formato disabled">'
-          +'<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M7 4.5V7.5M7 9.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>'
-          +'Link pendiente de configurar</button>';
-
-    return '<div class="formato-card '+f.clase+'">'
-      +'<div class="formato-icon" style="background:'+f.iconoBg+';color:'+f.iconoColor+';">'+f.icono+'</div>'
-      +'<span class="formato-badge" style="background:'+f.badgeBg+';color:'+f.badgeColor+';">'+f.badge+'</span>'
-      +'<h3>'+f.titulo+'</h3>'
-      +'<p>'+f.descripcion+'</p>'
-      + btnHtml
-      +'</div>';
-  }).join('');
-
-  var hayPendientes = FORMATOS_CONFIG.some(function(f){ return !f.url || f.url==='PENDIENTE'; });
-  var infoBanner = hayPendientes
-    ? '<div class="formato-info">'
-        +'<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="var(--az2)" stroke-width="1.2"/><path d="M8 5v3.5M8 10.5v.5" stroke="var(--az2)" stroke-width="1.3" stroke-linecap="round"/></svg>'
-        +'<span><strong>Configuración requerida:</strong> Uno o más formatos no tienen link asignado todavía. Para activarlos, comparta la carpeta o archivo en Google Drive como "Cualquiera con el enlace puede ver", copie el link y péguelo en la variable <code style="background:var(--az6);padding:1px 5px;border-radius:3px;">FORMATOS_CONFIG</code> dentro del código HTML.</span>'
-      +'</div>'
-    : '';
-
-  document.getElementById('mainContent').innerHTML =
-    '<div class="page-header">'
-      +'<h2>Formatos Oficiales</h2>'
-      +'<p>Descargue los formatos necesarios para trámites administrativos de proyectos viales.</p>'
-    +'</div>'
-    + infoBanner
-    +'<div class="formatos-grid">'+tarjetas+'</div>';
-}
-
-
-function renderEmpresasPanel() {
-  if (!currentUser || !currentUser.esGlobalAdmin) {
-    document.getElementById('mainContent').innerHTML = '<div class="empty-state"><p>Acceso restringido.</p></div>';
-    return;
-  }
-  var mc = document.getElementById('mainContent');
-  mc.innerHTML =
-    '<div class="page-header">' +
-      '<h2>Gestión de Empresas Precalificadas</h2>' +
-      '<p>Administre el catálogo de empresas constructoras y supervisoras.</p>' +
-      '<div class="page-actions">' +
-        '<button class="btn btn-primary" onclick="abrirModalEmpresa()">+ Nueva Empresa</button>' +
-        '<button class="btn btn-outline" onclick="cargarEmpresas().then(cargarTablaEmpresas)">↺ Actualizar</button>' +
-      '</div>' +
-    '</div>' +
-    '<div class="table-wrap">' +
-      '<div class="table-toolbar">' +
-        '<h3>Empresas registradas</h3>' +
-        '<div class="search-box"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="var(--gris3)" stroke-width="1.2"/><path d="M8 8l2.5 2.5" stroke="var(--gris3)" stroke-width="1.2" stroke-linecap="round"/></svg>' +
-        '<input type="text" placeholder="Buscar empresa..." oninput="filtrarTablaEmpresas(this.value)"/></div>' +
-        '<select class="filter-select" id="filtroTipoEmp" onchange="filtrarTablaEmpresas()">' +
-          '<option value="">Todos los tipos</option>' +
-          '<option value="constructora">Constructoras</option>' +
-          '<option value="supervisora">Supervisoras</option>' +
-          '<option value="ambas">Ambas</option>' +
-        '</select>' +
-      '</div>' +
-      '<div id="tablaEmpresas"><div class="empty-state"><p>Cargando...</p></div></div>' +
-    '</div>';
-  cargarTablaEmpresas();
-}
-
-var _todasEmpresas = [];
-
-async function cargarTablaEmpresas() {
-  try {
-    var rows = await supaGet('empresas', 'select=*&order=tipo.asc,nombre.asc');
-    _todasEmpresas = rows || [];
-    renderTablaEmpresas(_todasEmpresas);
-  } catch(e) {
-    var el = document.getElementById('tablaEmpresas');
-    if (el) el.innerHTML = '<div class="empty-state"><p>Error al cargar: ' + e.message + '</p></div>';
-  }
-}
-
-function renderTablaEmpresas(rows) {
-  var el = document.getElementById('tablaEmpresas');
-  if (!el) return;
-  if (!rows || !rows.length) {
-    el.innerHTML = '<div class="empty-state"><p>No hay empresas registradas.</p></div>';
-    return;
-  }
-  var tipoPill = {
-    constructora: '<span class="pill proc">Constructora</span>',
-    supervisora:  '<span class="pill ejec">Supervisora</span>',
-    ambas:        '<span class="pill" style="background:var(--gold6);color:var(--gold1);">Ambas</span>'
-  };
-  var tbody = rows.map(function(e) {
-    var estado = e.activa
-      ? '<span class="pill ejec">Activa</span>'
-      : '<span class="pill susp">Inactiva</span>';
-    return '<tr>' +
-      '<td style="font-weight:500;font-size:12px;">' + e.nombre + '</td>' +
-      '<td>' + (tipoPill[e.tipo] || e.tipo) + '</td>' +
-      '<td style="font-size:11px;color:var(--gris2);">' + (e.rtn || '—') + '</td>' +
-      '<td style="font-size:11px;color:var(--gris2);">' + (e.representante || '—') + '</td>' +
-      '<td style="font-size:11px;color:var(--gris2);">' + (e.telefono || '—') + '</td>' +
-      '<td>' + estado + '</td>' +
-      '<td><div class="tbl-actions">' +
-        '<button class="tbl-btn edit" onclick="abrirModalEmpresa(\'' + e.id + '\')">Editar</button>' +
-        '<button class="tbl-btn" onclick="toggleEmpresaActiva(\'' + e.id + '\',' + !e.activa + ')">' + (e.activa ? 'Desactivar' : 'Activar') + '</button>' +
-        '<button class="tbl-btn" style="color:var(--rojo)" onclick="eliminarEmpresa(\'' + e.id + '\',\'' + e.nombre.replace(/'/g,"\\'") + '\')">✕</button>' +
-      '</div></td>' +
-    '</tr>';
-  }).join('');
-
-  el.innerHTML =
-    '<table class="tbl"><thead><tr>' +
-      '<th>Nombre / Razón Social</th><th>Tipo</th><th>RTN</th><th>Representante</th><th>Teléfono</th><th>Estado</th><th>Acciones</th>' +
-    '</tr></thead><tbody>' + tbody + '</tbody></table>';
-}
-
-function filtrarTablaEmpresas(q) {
-  var query = typeof q === 'string' ? q.toLowerCase() : (document.querySelector('#tablaEmpresas')&&''||'');
-  var tipo  = (document.getElementById('filtroTipoEmp')||{}).value || '';
-  var filtrado = _todasEmpresas.filter(function(e) {
-    var matchQ = !query || (e.nombre||'').toLowerCase().includes(query) ||
-                 (e.rtn||'').toLowerCase().includes(query) ||
-                 (e.representante||'').toLowerCase().includes(query);
-    var matchT = !tipo || e.tipo === tipo;
-    return matchQ && matchT;
-  });
-  renderTablaEmpresas(filtrado);
-}
-
-function abrirModalEmpresa(id) {
-  var esEdicion = !!id;
-  document.getElementById('modalTitle').textContent = esEdicion ? 'Editar Empresa' : 'Nueva Empresa';
-  document.getElementById('modalBody').innerHTML =
-    '<div class="form-section">' +
-      '<div class="form-grid g2">' +
-        '<div class="form-group span2"><label>Nombre / Razón Social <span class="req">*</span></label>' +
-          '<input type="text" id="emp_nombre" placeholder="Nombre completo de la empresa"/></div>' +
-        '<div class="form-group"><label>Tipo <span class="req">*</span></label>' +
-          '<select id="emp_tipo">' +
-            '<option value="constructora">Constructora</option>' +
-            '<option value="supervisora">Supervisora</option>' +
-            '<option value="ambas">Ambas (Constructora y Supervisora)</option>' +
-          '</select></div>' +
-        '<div class="form-group"><label>RTN</label>' +
-          '<input type="text" id="emp_rtn" placeholder="14 dígitos" maxlength="14" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
-        '<div class="form-group"><label>Representante Legal</label>' +
-          '<input type="text" id="emp_representante" placeholder="Nombre completo"/></div>' +
-        '<div class="form-group"><label>Teléfono</label>' +
-          '<input type="text" id="emp_telefono" placeholder="(504) 0000-0000"/></div>' +
-        '<div class="form-group"><label>Correo Electrónico</label>' +
-          '<input type="email" id="emp_correo" placeholder="empresa@ejemplo.com"/></div>' +
-      '</div>' +
-    '</div>';
-
-  document.getElementById('modalOverlay').classList.add('open');
-  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
-  btnGuardar.onclick = function() { guardarEmpresa(id); };
-
-  if (esEdicion) {
-    var emp = _todasEmpresas.find(function(e){ return e.id === id; });
-    if (emp) {
-      document.getElementById('emp_nombre').value        = emp.nombre        || '';
-      document.getElementById('emp_tipo').value          = emp.tipo          || 'constructora';
-      document.getElementById('emp_rtn').value           = emp.rtn           || '';
-      document.getElementById('emp_representante').value = emp.representante || '';
-      document.getElementById('emp_telefono').value      = emp.telefono      || '';
-      document.getElementById('emp_correo').value        = emp.correo        || '';
+    showToast("Guardando registro...", "ok");
+    
+    // Persistir en Supabase
+    try {
+        await persistirProyecto(u, proj);
+        showBanner("✓ Registro guardado correctamente");
+        closeModal();
+        renderUnidad(u);
+    } catch(e) {
+        showToast("Error al guardar en base de datos", "err");
     }
-  }
 }
 
-async function guardarEmpresa(id) {
-  var nombre = (document.getElementById('emp_nombre').value || '').trim();
-  var tipo   = document.getElementById('emp_tipo').value;
-  if (!nombre) { showToast('El nombre de la empresa es obligatorio.', 'err'); return; }
+// --- FUNCIONES DE NAVEGACIÓN Y AUTH ---
 
-  var row = {
-    nombre:        nombre,
-    tipo:          tipo,
-    rtn:           (document.getElementById('emp_rtn').value || '').trim() || null,
-    representante: (document.getElementById('emp_representante').value || '').trim() || null,
-    telefono:      (document.getElementById('emp_telefono').value || '').trim() || null,
-    correo:        (document.getElementById('emp_correo').value || '').trim() || null,
-  };
+async function doLogin() {
+    var u = document.getElementById('loginUnidad').value;
+    var user = document.getElementById('loginUser').value;
+    if(!u || !user) return alert("Complete los datos");
+    
+    currentUser = { nombre: user, unidad: u, esAdmin: (u==='admin') };
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('appShell').style.display = 'flex';
+    document.getElementById('userName').textContent = user;
+    
+    showToast("Cargando base de datos...", "ok");
+    await cargarProyectos();
+    await cargarEmpresas();
+    showView('dashboard', document.getElementById('nav-dashboard'));
+}
 
-  try {
-    if (id) {
-      await supaPatch('empresas', id, row);
-      showToast('Empresa actualizada correctamente.', 'ok');
-    } else {
-      row.id = genUUID();
-      row.activa = true;
-      await supaPost('empresas', row);
-      showToast('Empresa registrada. Ya disponible en los formularios.', 'ok');
+function doLogout() { location.reload(); }
+
+function showView(view, el) {
+    currentView = view;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    if(el) el.classList.add('active');
+    if(view === 'dashboard') renderDashboard();
+    else if(view === 'formatos') renderFormatosPanel();
+    else renderUnidad(view);
+}
+
+function renderUnidad(u) {
+    var plist = DB[u] || [];
+    var rows = plist.map((p, i) => `
+        <tr>
+            <td>${i+1}</td>
+            <td>
+                <div style="font-weight:600">${p.proyecto}</div>
+                <div style="font-size:10px; color:var(--gris3)">${p.tipo_registro === 'supervision' ? '📋 SUPERVISIÓN' : '🏗️ CONSTRUCCIÓN'}</div>
+            </td>
+            <td>${p.tipo_registro === 'supervision' ? p.supervisora : p.constructora}</td>
+            <td>${p.noContrato || '—'}</td>
+            <td><span class="pill ${p.estado === 'En Ejecución' ? 'ejec' : 'proc'}">${p.estado}</span></td>
+            <td>
+                <button class="tbl-btn" onclick="openDetail('${u}',${i})">Ver</button>
+                <button class="tbl-btn edit" onclick="openForm('${u}',${i})">Editar</button>
+            </td>
+        </tr>
+    `).join('');
+
+    document.getElementById('mainContent').innerHTML = `
+        <div class="page-header">
+            <h2>${UNIDADES[u].nombre}</h2>
+            <div class="page-actions"><button class="btn btn-primary" onclick="openForm('${u}',null)">+ Nuevo Registro</button></div>
+        </div>
+        <div class="table-wrap">
+            <table class="tbl">
+                <thead><tr><th>#</th><th>Proyecto</th><th>Empresa</th><th>Contrato</th><th>Estado</th><th>Acciones</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="6" style="text-align:center">No hay registros</td></tr>'}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+// --- FUNCIONES DE COMUNICACIÓN CON SUPABASE ---
+
+async function cargarProyectos() {
+    try {
+        let r = await fetch(SUPA_URL + '/proyectos?select=*', { headers: H_BASE });
+        let rows = await r.json();
+        DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
+        rows.forEach(row => {
+            if(DB[row.unidad]) {
+                let p = row.data; p._sid = row.id;
+                DB[row.unidad].push(p);
+            }
+        });
+        document.getElementById('syncDot').style.background = "var(--verde)";
+        document.getElementById('syncLabel').textContent = "Conectado";
+    } catch(e) { 
+        document.getElementById('syncLabel').textContent = "Modo Offline";
     }
-    closeModal();
-    document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
-    await cargarEmpresas();
-    cargarTablaEmpresas();
-  } catch(e) {
-    showToast('Error al guardar: ' + e.message, 'err');
-  }
 }
 
-async function toggleEmpresaActiva(id, nuevoEstado) {
-  var accion = nuevoEstado ? 'activar' : 'desactivar';
-  if (!confirm('¿Confirma ' + accion + ' esta empresa?')) return;
-  try {
-    await supaPatch('empresas', id, { activa: nuevoEstado });
-    showToast('Empresa ' + (nuevoEstado ? 'activada' : 'desactivada') + '.', 'ok');
-    await cargarEmpresas();
-    cargarTablaEmpresas();
-  } catch(e) {
-    showToast('Error: ' + e.message, 'err');
-  }
+async function cargarEmpresas() {
+    try {
+        let r = await fetch(SUPA_URL + '/empresas?select=*', { headers: H_BASE });
+        let rows = await r.json();
+        EMPRESAS.constructoras = rows.filter(e => e.tipo === 'constructora' || e.tipo === 'ambas');
+        EMPRESAS.supervisoras = rows.filter(e => e.tipo === 'supervisora' || e.tipo === 'ambas');
+    } catch(e) {}
 }
 
-async function eliminarEmpresa(id, nombre) {
-  if (!confirm('¿Eliminar permanentemente "' + nombre + '"?\nEsta acción no se puede deshacer.')) return;
-  try {
-    await supaDelete('empresas', id);
-    showToast('Empresa eliminada.', 'ok');
-    await cargarEmpresas();
-    cargarTablaEmpresas();
-  } catch(e) {
-    showToast('Error: ' + e.message, 'err');
-  }
+async function persistirProyecto(unidad, data) {
+    let row = { unidad: unidad, proyecto: data.proyecto, data: data };
+    let url = SUPA_URL + '/proyectos';
+    let method = 'POST';
+    
+    if(data._sid) {
+        url += '?id=eq.' + data._sid;
+        method = 'PATCH';
+    }
+
+    let r = await fetch(url, {
+        method: method,
+        headers: H_WRITE,
+        body: JSON.stringify(row)
+    });
+    if(!r.ok) throw new Error("Error DB");
 }
 
-
-function actualizarMunicipios(valorActual) {
-  var dep = document.getElementById('f_departamento');
-  var mun = document.getElementById('f_municipio');
-  if (!dep || !mun) return;
-  var d    = dep.value;
-  var prev = valorActual || mun.value;
-  var lista = (d && MUNICIPIOS[d]) ? MUNICIPIOS[d] : [];
-  mun.innerHTML = lista.length
-    ? '<option value="">— Seleccione municipio —</option>'
-      + lista.map(function(m){ return '<option'+(m===prev?' selected':'')+'>'+m+'</option>'; }).join('')
-    : '<option value="">— Seleccione departamento primero —</option>';
+function showToast(m, type) {
+    var t = document.getElementById('toast');
+    t.textContent = m; t.className = 'toast show';
+    setTimeout(() => t.className = 'toast', 3000);
 }
 
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { closeModal(); closeDetail(); closeNav(); }
-});
-
-
-// ═══════════════════════════════════════════════════════════
-//  REPORTE GENERAL — genera y descarga HTML con gráficas
-// ═══════════════════════════════════════════════════════════
-function generarReporte() {
-  var fecha = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
-  var allP  = Object.values(DB).flat();
-  var total = allP.length;
-  var ejec  = allP.filter(function(p){return p.estado==='En Ejecución';}).length;
-  var proc  = allP.filter(function(p){return p.estado==='En Proceso / Contratación';}).length;
-  var susp  = allP.filter(function(p){return p.estado==='Suspendido';}).length;
-  var term  = allP.filter(function(p){return p.estado==='Terminado';}).length;
-  var avgFis= total ? (allP.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/total).toFixed(1) : 0;
-  var totalMonto   = allP.reduce(function(a,p){var mI=parseFloat(p.montoContratoInicial)||0;var mM=parseFloat(p.montoModificacion)||0;return a+(mM>0?mM:mI);},0);
-  var totalDeveng  = allP.reduce(function(a,p){return a+(parseFloat(p.totalDevengado)||0);},0);
-  var avgFin = totalMonto>0 ? (totalDeveng/totalMonto*100).toFixed(1) : 0;
-
-  // Per-unit data
-  var unitData = Object.entries(UNIDADES).map(function(e){
-    var k=e[0]; var u=e[1];
-    var pl = DB[k]||[];
-    var af  = pl.length ? (pl.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/pl.length).toFixed(1) : 0;
-    var mon = pl.reduce(function(a,p){var mI=parseFloat(p.montoContratoInicial)||0;var mM=parseFloat(p.montoModificacion)||0;return a+(mM>0?mM:mI);},0);
-    var dev = pl.reduce(function(a,p){return a+(parseFloat(p.totalDevengado)||0);},0);
-    var afin= mon>0?(dev/mon*100).toFixed(1):0;
-    var eN  = pl.filter(function(p){return p.estado==='En Ejecución';}).length;
-    var sN  = pl.filter(function(p){return p.estado==='Suspendido';}).length;
-    var tN  = pl.filter(function(p){return p.estado==='Terminado';}).length;
-    return {key:k,nombre:u.nombre,color:u.color,total:pl.length,af:af,afin:afin,
-            monto:mon,devengado:dev,ejec:eN,susp:sN,term:tN};
-  });
-
-  function fmtL(n){return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2});}
-
-  // Build SVG donut pie charts per unit (outer ring=físico, inner ring=financiero)
-  function makePie(pct, color, r, cx, cy) {
-    var p = Math.min(Math.max(parseFloat(pct)||0,0),100);
-    var circ = 2*Math.PI*r;
-    var dash = (p/100)*circ;
-    var gap  = circ-dash;
-    return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#e8ecf0" stroke-width="14"/>'
-      +'<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+color+'" stroke-width="14"'
-      +' stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'"'
-      +' stroke-linecap="butt" transform="rotate(-90 '+cx+' '+cy+')" />';
-  }
-  var piecharts = unitData.map(function(u){
-    var cx=55,cy=55;
-    var label = u.nombre
-      .replace('Red Vial No Pavimentada','RV No Pavim.')
-      .replace('Red Vial Pavimentada','RV Pavimentada')
-      .replace('Respuesta Rápida a Emergencias','Resp. Rápida')
-      .replace('Fondos Externos/Nacionales','Fondos Ext/Nac')
-      .replace('Fondos BCIE','Fondos BCIE')
-      .replace('Limpieza de Derecho de Vía','Limp. D. de Vía');
-    return '<div style="text-align:center;width:150px;">'
-      +'<svg width="110" height="110" viewBox="0 0 110 110">'
-      + makePie(u.af,  '#1268C4', 42, cx, cy)
-      + makePie(u.afin,'#0D7A4E', 26, cx, cy)
-      +'<text x="'+cx+'" y="'+(cy-5)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#1268C4" font-family="monospace">'+u.af+'%</text>'
-      +'<text x="'+cx+'" y="'+(cy+10)+'" text-anchor="middle" font-size="10" fill="#0D7A4E" font-family="monospace">'+u.afin+'%</text>'
-      +'</svg>'
-      +'<div style="font-size:10px;color:#333;font-weight:600;margin-top:2px;line-height:1.4;">'+label+'</div>'
-      +'<div style="font-size:9px;color:#888;margin-top:1px;">'+u.total+' proy.</div>'
-      +'</div>';
-  }).join('');
-
-  // Estado pie visual (simple bar)
-  var estadoRows = [
-    {label:'En Ejecución',val:ejec,color:'#0D7A4E'},
-    {label:'En Proceso',val:proc,color:'#1268C4'},
-    {label:'Suspendido',val:susp,color:'#B8620A'},
-    {label:'Terminado',val:term,color:'#7B8FA0'},
-  ].map(function(e){
-    var pct = total>0?(e.val/total*100).toFixed(1):0;
-    return '<tr><td style="padding:5px 8px;font-size:12px;">'+e.label+'</td>'
-      +'<td style="padding:5px 8px;"><div style="height:14px;background:#eee;border-radius:3px;overflow:hidden;width:200px;">'
-      +'<div style="height:100%;width:'+pct+'%;background:'+e.color+';border-radius:3px;"></div></div></td>'
-      +'<td style="padding:5px 12px;font-size:12px;font-weight:600;">'+e.val+'</td>'
-      +'<td style="padding:5px 8px;font-size:11px;color:#666;">'+pct+'%</td>'
-      +'</tr>';
-  }).join('');
-
-  // Unit summary table rows
-  var unitRows = unitData.map(function(u){
-    return '<tr>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:500;color:'+u.color+';">'+u.nombre+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.total+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.ejec+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.susp+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.term+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'
-        +'<div style="display:flex;align-items:center;gap:6px;">'
-        +'<div style="flex:1;height:8px;background:#eee;border-radius:4px;overflow:hidden;">'
-        +'<div style="height:100%;width:'+u.af+'%;background:#1268C4;border-radius:4px;"></div></div>'
-        +'<span style="font-size:11px;font-weight:600;color:#1268C4;width:36px;">'+u.af+'%</span></div></td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'
-        +'<div style="display:flex;align-items:center;gap:6px;">'
-        +'<div style="flex:1;height:8px;background:#eee;border-radius:4px;overflow:hidden;">'
-        +'<div style="height:100%;width:'+u.afin+'%;background:#0D7A4E;border-radius:4px;"></div></div>'
-        +'<span style="font-size:11px;font-weight:600;color:#0D7A4E;width:36px;">'+u.afin+'%</span></div></td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(u.monto)+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(u.devengado)+'</td>'
-      +'</tr>';
-  }).join('');
-
-  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>'
-    +'<title>Reporte DGCV — '+fecha+'</title>'
-    +'<style>'
-    +'*{box-sizing:border-box;margin:0;padding:0;}'
-    +'body{font-family:"Segoe UI",Arial,sans-serif;background:#f5f7fa;color:#1C2B3A;font-size:13px;}'
-    +'.page{max-width:1100px;margin:0 auto;padding:24px;}'
-    +'.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:28px 32px;border-radius:10px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #D4A820;}'
-    +'.header h1{font-size:20px;font-weight:700;letter-spacing:.3px;}'
-    +'.header p{font-size:11px;opacity:.7;margin-top:4px;}'
-    +'.header .fecha{text-align:right;font-size:11px;opacity:.7;}'
-    +'.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px;}'
-    +'.kpi{background:#fff;border-radius:8px;padding:16px;border:1px solid #D0DCE6;border-top:3px solid #1268C4;}'
-    +'.kpi.g{border-top-color:#0D7A4E;}.kpi.a{border-top-color:#D4A820;}.kpi.r{border-top-color:#C0392B;}.kpi.gr{border-top-color:#7B8FA0;}'
-    +'.kpi-num{font-size:28px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'
-    +'.kpi-lbl{font-size:11px;color:#7B8FA0;margin-top:5px;font-weight:500;}'
-    +'.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:20px;overflow:hidden;}'
-    +'.section-title{background:#f8f9fb;padding:12px 18px;font-size:12px;font-weight:600;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;}'
-    +'.section-title::before{content:"";display:inline-block;width:3px;height:16px;background:#D4A820;border-radius:2px;}'
-    +'.section-body{padding:18px;}'
-    +'.chart-container{display:flex;gap:8px;align-items:flex-end;padding:10px 0;}'
-    +'.legend{display:flex;gap:16px;margin-top:12px;justify-content:center;}'
-    +'.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#666;}'
-    +'.legend-dot{width:10px;height:10px;border-radius:2px;}'
-    +'table{width:100%;border-collapse:collapse;}'
-    +'th{background:#f0f4f8;padding:9px 12px;text-align:left;font-size:10px;font-weight:600;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;}'
-    +'.footer{text-align:center;font-size:10px;color:#aaa;margin-top:24px;padding:12px;border-top:1px solid #eee;}'
-    +'@media print{'+'*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}'+'body{background:#fff;font-size:11px;}'+'@page{margin:12mm 10mm;size:A4;}'+'button{display:none;}'+'body{background:#fff!important;}'+'}'
-    +'</style></head><body><div class="page">'
-
-    // Header
-    +'<div class="header">'
-    +'<div><h1>Reporte General de Avance — DGCV</h1><p>Dirección General de Conservación Vial · Secretaría de Infraestructura y Transporte</p></div>'
-    +'<div class="fecha">Generado el<br><strong>'+fecha+'</strong></div>'
-    +'</div>'
-
-    // KPIs
-    +'<div class="kpi-grid">'
-    +'<div class="kpi"><div class="kpi-num">'+total+'</div><div class="kpi-lbl">Total Proyectos</div></div>'
-    +'<div class="kpi g"><div class="kpi-num">'+ejec+'</div><div class="kpi-lbl">En Ejecución</div></div>'
-    +'<div class="kpi a"><div class="kpi-num">'+avgFis+'%</div><div class="kpi-lbl">Avance Físico Prom.</div></div>'
-    +'<div class="kpi g"><div class="kpi-num">'+avgFin+'%</div><div class="kpi-lbl">Avance Financiero Prom.</div></div>'
-    +'<div class="kpi r"><div class="kpi-num">'+susp+'</div><div class="kpi-lbl">Suspendidos</div></div>'
-    +'</div>'
-
-    // Gráfica pastel avance por unidad
-    +'<div class="section"><div class="section-title">Avance por Unidad</div><div class="section-body">'
-    +'<div style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center;padding:10px 0;">'+piecharts+'</div>'
-    +'<div class="legend"><div class="legend-item"><div class="legend-dot" style="background:#1268C4"></div>Avance Físico</div>'
-    +'<div class="legend-item"><div class="legend-dot" style="background:#0D7A4E"></div>Avance Financiero</div>'
-    +'<div class="legend-item"><div class="legend-dot" style="background:#e0e0e0"></div>Pendiente</div></div>'
-    +'</div></div>'
-
-    // Estado de proyectos
-    +'<div class="section"><div class="section-title">Distribución por Estado</div><div class="section-body">'
-    +'<table><thead><tr><th>Estado</th><th>Distribución</th><th>Cantidad</th><th>Porcentaje</th></tr></thead>'
-    +'<tbody>'+estadoRows+'</tbody></table>'
-    +'</div></div>'
-
-    // Resumen por unidad
-    +'<div class="section"><div class="section-title">Resumen por Unidad</div><div class="section-body">'
-    +'<table><thead><tr>'
-    +'<th>Unidad</th><th>Proyectos</th><th>En Ejec.</th><th>Susp.</th><th>Term.</th>'
-    +'<th>Av. Físico</th><th>Av. Financiero</th><th>Monto Contrato</th><th>Total Devengado</th>'
-    +'</tr></thead><tbody>'+unitRows+'</tbody></table>'
-    +'</div></div>'
-
-    // Monto total
-    +'<div class="section"><div class="section-title">Resumen Financiero General</div><div class="section-body">'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">'
-    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
-    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Monto Total de Contratos</div>'
-    +'<div style="font-size:18px;font-weight:600;color:#001233;font-family:monospace;">L '+fmtL(totalMonto)+'</div></div>'
-    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
-    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Total Devengado</div>'
-    +'<div style="font-size:18px;font-weight:600;color:#0D7A4E;font-family:monospace;">L '+fmtL(totalDeveng)+'</div></div>'
-    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
-    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Saldo Pendiente</div>'
-    +'<div style="font-size:18px;font-weight:600;color:#C0392B;font-family:monospace;">L '+fmtL(totalMonto-totalDeveng)+'</div></div>'
-    +'</div></div></div>'
-
-    +'<div class="footer">Reporte generado por el Sistema de Seguimiento DGCV · '+fecha+' · Secretaría de Infraestructura y Transporte · República de Honduras</div>'
-    +'</div></body></html>';
-
-  // Abrir en ventana nueva y lanzar impresión/guardar como PDF
-  var win = window.open('', '_blank', 'width=1100,height=800');
-  if (!win) { showToast('Permite las ventanas emergentes para generar el PDF.', 'err'); return; }
-  win.document.write(html);
-  win.document.close();
-  // Pequeño delay para que el navegador termine de renderizar antes de imprimir
-  win.onload = function() {
-    setTimeout(function() {
-      win.focus();
-      win.print();
-    }, 600);
-  };
-  showToast('Se abrió el reporte — selecciona "Guardar como PDF" en el diálogo de impresión.', 'ok');
+function showBanner(m) {
+    var b = document.getElementById('successBanner');
+    b.textContent = m; b.className = 'success-banner show';
+    setTimeout(() => b.className = 'success-banner', 3000);
 }
 
-// ═══════════════════════════════════════════════════════════
-//  MÓVIL — NAVEGACIÓN DRAWER
-// ═══════════════════════════════════════════════════════════
-function isMobile() { return window.innerWidth <= 600; }
+function closeModal(e) { if(!e || e.target.id === 'modalOverlay') document.getElementById('modalOverlay').classList.remove('open'); }
 
-function toggleNav() {
-  var sidenav = document.querySelector('.sidenav');
-  var overlay = document.getElementById('navOverlay');
-  if (sidenav.classList.contains('open')) {
-    closeNav();
-  } else {
-    sidenav.classList.add('open');
-    if (overlay) overlay.classList.add('open');
-    document.body.style.overflow = 'hidden';
-  }
-}
-
-function closeNav() {
-  var sidenav = document.querySelector('.sidenav');
-  var overlay = document.getElementById('navOverlay');
-  if (sidenav) sidenav.classList.remove('open');
-  if (overlay) overlay.classList.remove('open');
-  document.body.style.overflow = '';
-}
-
-function checkMobileLayout() {
-  var btn = document.getElementById('hamburgerBtn');
-  if (!btn) return;
-  if (isMobile()) {
-    btn.style.display = 'flex';
-  } else {
-    btn.style.display = 'none';
-    closeNav();
-  }
-}
-
-window.addEventListener('resize', checkMobileLayout);
-window.addEventListener('load', checkMobileLayout);
-
-// Swipe gestures: left-edge swipe opens nav, swipe-left closes it
-(function() {
-  var startX = 0, startY = 0;
-  document.addEventListener('touchstart', function(e) {
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-  }, { passive: true });
-  document.addEventListener('touchend', function(e) {
-    if (!isMobile()) return;
-    var dx = e.changedTouches[0].clientX - startX;
-    var dy = Math.abs(e.changedTouches[0].clientY - startY);
-    if (startX < 30 && dx > 60 && dy < 60) toggleNav();
-    if (dx < -80 && dy < 60) closeNav();
-  }, { passive: true });
-})();
+function renderDashboard() { document.getElementById('mainContent').innerHTML = "<h3>Dashboard en construcción</h3>"; }
+function renderFormatosPanel() { document.getElementById('mainContent').innerHTML = "<h3>Panel de formatos</h3>"; }
+function openDetail(u, i) { alert("Detalle: " + DB[u][i].proyecto); }
