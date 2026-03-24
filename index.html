@@ -697,21 +697,8 @@ input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3
     </div>
     <div class="login-body">
       <div class="form-group">
-        <label>Unidad / Coordinación</label>
-        <select id="loginUnidad">
-          <option value="">— Seleccione su unidad —</option>
-          <option value="admin">Administración General</option>
-          <option value="rvp">Red Vial Pavimentada</option>
-          <option value="rvnp">Red Vial No Pavimentada</option>
-          <option value="rre">Respuesta Rápida a Emergencias</option>
-          <option value="fext">Fondos Externos/Nacionales</option>
-          <option value="fbcie">Fondos BCIE</option>
-          <option value="ldv">Limpieza de Derecho de Vía</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Nombre de usuario</label>
-        <input type="text" id="loginUser" placeholder="usuario.coordinador"/>
+        <label>Correo electrónico</label>
+        <input type="email" id="loginUser" placeholder="coordinador@sit.gob.hn" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()"/>
       </div>
       <div class="form-group">
         <label>Contraseña</label>
@@ -946,8 +933,24 @@ input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3
 // ═══════════════════════════════════════════════════════════
 //  SUPABASE — API REST directa (sin librería externa)
 // ═══════════════════════════════════════════════════════════
-var SUPA_URL = 'https://furbzmtimdvsterqenff.supabase.co/rest/v1';
-var SUPA_KEY = 'sb_publishable_v7rjxV61uvkibEfTDo6gJA_78Rzsocm';
+var SUPA_URL      = 'https://furbzmtimdvsterqenff.supabase.co/rest/v1';
+var SUPA_AUTH_URL = 'https://furbzmtimdvsterqenff.supabase.co/auth/v1';
+var SUPA_KEY      = 'sb_publishable_v7rjxV61uvkibEfTDo6gJA_78Rzsocm';
+
+// Token JWT de la sesión activa — se actualiza al hacer login/logout
+var _authToken = null;
+
+// Devuelve cabeceras usando el JWT de sesión cuando está disponible,
+// o la clave pública como fallback para lecturas anónimas
+function getHeaders(write) {
+  var bearer = _authToken || SUPA_KEY;
+  var base = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + bearer, 'Content-Type': 'application/json' };
+  if (write) {
+    base['Prefer'] = 'return=minimal';
+    base['x-app-secret'] = 'SIT_DGCV_2025_SECRET';
+  }
+  return base;
+}
 
 // Generar UUID en el cliente — evita depender de Supabase para obtener el ID
 function genUUID() {
@@ -957,21 +960,14 @@ function genUUID() {
   });
 }
 
-// SHA-256 via Web Crypto API (todos los navegadores modernos lo tienen)
-async function sha256hex(msg) {
-  var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
-  return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
-}
-
-var H_BASE  = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
-// x-app-secret: cabecera de firma para operaciones de escritura — debe coincidir con la política RLS
+var H_BASE  = {};  // legacy — mantenido para compatibilidad; usar getHeaders()
 var APP_SECRET = 'SIT_DGCV_2025_SECRET';
-var H_WRITE = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal', 'x-app-secret': APP_SECRET });
-var H_DEL   = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal', 'x-app-secret': APP_SECRET });
+var H_WRITE = {};
+var H_DEL   = {};
 
 function supaGet(table, query) {
   return fetch(SUPA_URL + '/' + table + '?' + (query || ''), {
-    method: 'GET', headers: H_BASE
+    method: 'GET', headers: getHeaders(false)
   }).then(function(r) {
     return r.text().then(function(t) {
       if (!r.ok) throw new Error('GET ' + table + ' [' + r.status + ']: ' + t);
@@ -982,7 +978,7 @@ function supaGet(table, query) {
 
 function supaPost(table, body) {
   return fetch(SUPA_URL + '/' + table, {
-    method: 'POST', headers: H_WRITE, body: JSON.stringify(body)
+    method: 'POST', headers: getHeaders(true), body: JSON.stringify(body)
   }).then(function(r) {
     return r.text().then(function(t) {
       if (!r.ok) throw new Error('POST ' + table + ' [' + r.status + ']: ' + t);
@@ -993,7 +989,7 @@ function supaPost(table, body) {
 
 function supaPatch(table, id, body) {
   return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
-    method: 'PATCH', headers: H_WRITE, body: JSON.stringify(body)
+    method: 'PATCH', headers: getHeaders(true), body: JSON.stringify(body)
   }).then(function(r) {
     return r.text().then(function(t) {
       if (!r.ok) throw new Error('PATCH ' + table + ' [' + r.status + ']: ' + t);
@@ -1003,7 +999,7 @@ function supaPatch(table, id, body) {
 
 function supaDelete(table, id) {
   return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
-    method: 'DELETE', headers: H_DEL
+    method: 'DELETE', headers: getHeaders(true)
   }).then(function(r) {
     if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
   });
@@ -1205,20 +1201,19 @@ function empresaInput(id, tipo, valor) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  AUTH
+//  AUTH — Supabase Auth (email + contraseña cifrada en Supabase)
 // ═══════════════════════════════════════════════════════════
 async function doLogin() {
-  var unidad = document.getElementById('loginUnidad').value;
-  var user   = document.getElementById('loginUser').value.trim().toLowerCase();
-  var pass   = document.getElementById('loginPass').value;
-  var err    = document.getElementById('loginError');
-  var btn    = document.querySelector('.login-btn');
+  var email = document.getElementById('loginUser').value.trim().toLowerCase();
+  var pass  = document.getElementById('loginPass').value;
+  var err   = document.getElementById('loginError');
+  var btn   = document.querySelector('.login-btn');
 
   err.style.display = 'none';
 
-  if (!unidad || !user || !pass) {
+  if (!email || !pass) {
     err.style.display = 'block';
-    err.textContent = 'Complete todos los campos.';
+    err.textContent = 'Ingrese su correo y contraseña.';
     return;
   }
 
@@ -1226,19 +1221,37 @@ async function doLogin() {
   btn.disabled = true;
 
   try {
-    // Hash SHA-256 de la contrasena antes de comparar con la BD
-    var passHash = await sha256hex(pass);
+    // ── Paso 1: autenticar con Supabase Auth
+    var authResp = await fetch(SUPA_AUTH_URL + '/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: pass })
+    });
+    var authData = await authResp.json();
 
-    // Buscar usuario en Supabase
-    var rows = await supaGet('usuarios',
-      'select=*&username=eq.' + encodeURIComponent(user) +
-      '&password=eq.' + encodeURIComponent(passHash) +
-      '&activo=eq.true'
-    );
+    if (!authResp.ok) {
+      err.style.display = 'block';
+      err.textContent = 'Credenciales incorrectas. Verifique su correo y contraseña.';
+      btn.textContent = 'Ingresar al Sistema';
+      btn.disabled = false;
+      return;
+    }
+
+    // ── Paso 2: guardar token JWT — todas las operaciones lo usarán
+    _authToken = authData.access_token;
+
+    // ── Paso 3: obtener perfil del usuario desde tabla 'usuarios' por email
+    var rows = await supaGet('usuarios', 'select=*&correo=eq.' + encodeURIComponent(email) + '&activo=eq.true');
 
     if (!rows || rows.length === 0) {
+      // Auth OK pero sin perfil activo en tabla usuarios → denegar acceso
+      await fetch(SUPA_AUTH_URL + '/logout', {
+        method: 'POST',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + _authToken }
+      });
+      _authToken = null;
       err.style.display = 'block';
-      err.textContent = 'Credenciales incorrectas o usuario inactivo.';
+      err.textContent = 'Usuario autenticado pero sin perfil activo en el sistema. Contacte al administrador.';
       btn.textContent = 'Ingresar al Sistema';
       btn.disabled = false;
       return;
@@ -1246,37 +1259,29 @@ async function doLogin() {
 
     var u = rows[0];
 
-    // Verificar que la unidad seleccionada coincide (admin puede elegir cualquiera)
-    if (u.unidad !== 'admin' && u.unidad !== unidad) {
-      err.style.display = 'block';
-      err.textContent = 'El usuario no pertenece a la unidad seleccionada.';
-      btn.textContent = 'Ingresar al Sistema';
-      btn.disabled = false;
-      return;
-    }
-
-    // Login exitoso — cargar proyectos
+    // ── Paso 4: construir sesión local
     btn.textContent = 'Cargando datos...';
     await cargarProyectos();
     await cargarEmpresas();
 
-    var efectiveUnidad = u.unidad === 'admin' ? unidad : u.unidad;
-    var esGlobalAdmin   = (u.unidad === 'admin' && u.rol === 'admin');   // Admin General → todo
-    var esGlobalViewer  = (u.unidad === 'admin' && u.rol !== 'admin');   // Coord. General → solo lectura
-    var esUnidadAdmin   = (u.unidad !== 'admin' && u.rol === 'admin');   // Admin de unidad → edita toda su unidad
-    var esUnidadCoord   = (u.unidad !== 'admin' && u.rol !== 'admin');   // Coord. de unidad → edita solo los suyos
+    var efectiveUnidad = u.unidad;
+    var esGlobalAdmin  = (u.unidad === 'admin' && u.rol === 'admin');
+    var esGlobalViewer = (u.unidad === 'admin' && u.rol !== 'admin');
+    var esUnidadAdmin  = (u.unidad !== 'admin' && u.rol === 'admin');
+    var esUnidadCoord  = (u.unidad !== 'admin' && u.rol !== 'admin');
+
     currentUser = {
       id:            u.id,
       unidad:        efectiveUnidad,
       nombre:        u.nombre,
       rol:           UNIDAD_NOMBRES[efectiveUnidad] || u.unidad,
-      rolDB:         u.rol,                   // 'admin' | 'coordinador'
-      unidadDB:      u.unidad,                // unidad real de la BD (puede ser 'admin')
-      esAdmin:       esGlobalAdmin,           // acceso total + gestión usuarios
+      rolDB:         u.rol,
+      unidadDB:      u.unidad,
+      esAdmin:       esGlobalAdmin,
       esGlobalAdmin: esGlobalAdmin,
-      esGlobalViewer:esGlobalViewer,          // ve todo, edita nada
-      esUnidadAdmin: esUnidadAdmin,           // edita toda su unidad
-      esUnidadCoord: esUnidadCoord            // edita solo sus propios proyectos
+      esGlobalViewer:esGlobalViewer,
+      esUnidadAdmin: esUnidadAdmin,
+      esUnidadCoord: esUnidadCoord
     };
 
     document.getElementById('loginScreen').style.display = 'none';
@@ -1290,7 +1295,6 @@ async function doLogin() {
     if (syncStatus) syncStatus.style.display = 'flex';
     if (syncBtn)    syncBtn.style.display    = 'flex';
 
-    // Item de gestion de usuarios — solo visible para admins
     var navUsuarios        = document.getElementById('nav-usuarios');
     var navUsuariosSection = document.getElementById('nav-usuarios-section');
     var navEmpresas        = document.getElementById('nav-empresas');
@@ -1301,47 +1305,54 @@ async function doLogin() {
     if (reportBtn) reportBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
 
     if (currentUser.esGlobalViewer) {
-      // Coord. General: ve todas las unidades pero sin opción de gestión de usuarios — nada se oculta en nav
-      // (nav-usuarios ya está oculto porque esAdmin=false)
+      // Coord. General: ve todas las unidades
     } else if (!currentUser.esAdmin) {
-      // Coordinadores/admins de unidad: solo ven su unidad
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
         var v = el.id.replace('nav-', '');
         if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos') el.style.display = 'none';
       });
     }
-    // esGlobalAdmin: no oculta nada
 
     updateBadges();
     showView('dashboard', document.getElementById('nav-dashboard'));
 
     btn.textContent = 'Ingresar al Sistema';
     btn.disabled = false;
-
-    showToast(dbOnline ? 'Bienvenido, ' + u.nombre + '.' : 'Sesion iniciada (sin conexion a BD).', dbOnline ? 'ok' : 'err');
+    showToast('Bienvenido, ' + u.nombre + '.', 'ok');
 
   } catch(e) {
     err.style.display = 'block';
-    err.textContent = 'Error de conexion. Verifique su red.';
+    err.textContent = 'Error de conexión. Verifique su red.';
     btn.textContent = 'Ingresar al Sistema';
     btn.disabled = false;
   }
 }
 
-function doLogout() {
+async function doLogout() {
+  // Cerrar sesión en Supabase Auth
+  if (_authToken) {
+    try {
+      await fetch(SUPA_AUTH_URL + '/logout', {
+        method: 'POST',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + _authToken }
+      });
+    } catch(e) { /* ignorar error de logout */ }
+    _authToken = null;
+  }
   currentUser = null;
   DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
-  document.getElementById('appShell').style.display  = 'none';
+  document.getElementById('appShell').style.display   = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('loginPass').value = '';
+  document.getElementById('loginUser').value = '';
   document.getElementById('loginError').style.display = 'none';
   document.querySelectorAll('.nav-item').forEach(function(el) { el.style.display = ''; });
-  var navUsuarios = document.getElementById('nav-usuarios');
+  var navUsuarios        = document.getElementById('nav-usuarios');
   var navUsuariosSection = document.getElementById('nav-usuarios-section');
-  var navEmpresasL = document.getElementById('nav-empresas');
-  if (navUsuarios) navUsuarios.style.display = 'none';
+  var navEmpresasL       = document.getElementById('nav-empresas');
+  if (navUsuarios)        navUsuarios.style.display        = 'none';
   if (navUsuariosSection) navUsuariosSection.style.display = 'none';
-  if (navEmpresasL) navEmpresasL.style.display = 'none';
+  if (navEmpresasL)       navEmpresasL.style.display       = 'none';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2355,26 +2366,26 @@ async function cargarTablaUsuarios() {
   try {
     var rows = await supaGet('usuarios', 'select=*&order=unidad.asc,nombre.asc');
     var tbody = '';
-    (rows || []).forEach(function(u, i) {
+    (rows || []).forEach(function(u) {
       var estadoPill = u.activo
         ? '<span class="pill ejec">Activo</span>'
         : '<span class="pill susp">Inactivo</span>';
       tbody += '<tr>' +
-        '<td><strong>' + u.username + '</strong></td>' +
-        '<td>' + u.nombre + '</td>' +
+        '<td style="font-size:11px;color:var(--gris2);">' + (u.correo || '—') + '</td>' +
+        '<td><strong>' + u.nombre + '</strong></td>' +
         '<td>' + (UNIDAD_NOMBRES[u.unidad] || u.unidad) + '</td>' +
         '<td>' + (u.rol === 'admin' ? 'Administrador' : 'Coordinador') + '</td>' +
         '<td>' + estadoPill + '</td>' +
         '<td><div class="tbl-actions">' +
           '<button class="tbl-btn edit" onclick="abrirModalUsuario(\'' + u.id + '\')">Editar</button>' +
           '<button class="tbl-btn" onclick="cambiarEstadoUsuario(\'' + u.id + '\',' + !u.activo + ')">' + (u.activo ? 'Desactivar' : 'Activar') + '</button>' +
-          '<button class="tbl-btn" style="color:var(--rojo)" onclick="cambiarPasswordUsuario(\'' + u.id + '\',\'' + u.username + '\')">Cambiar contraseña</button>' +
+          '<button class="tbl-btn" style="color:var(--rojo)" onclick="cambiarPasswordUsuario(\'' + u.id + '\',\'' + (u.correo||'').replace(/'/g,"\\'") + '\')">Cambiar contraseña</button>' +
         '</div></td>' +
       '</tr>';
     });
     document.getElementById('tablaUsuarios').innerHTML =
       '<table class="tbl"><thead><tr>' +
-        '<th>Usuario</th><th>Nombre</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Acciones</th>' +
+        '<th>Correo</th><th>Nombre</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Acciones</th>' +
       '</tr></thead><tbody>' + tbody + '</tbody></table>';
   } catch(e) {
     document.getElementById('tablaUsuarios').innerHTML = '<div class="empty-state"><p>Error al cargar usuarios: ' + e.message + '</p></div>';
@@ -2387,8 +2398,8 @@ function abrirModalUsuario(id) {
     '<div class="form-grid g2">' +
       '<div class="form-group"><label>Nombre completo <span class="req">*</span></label>' +
         '<input type="text" id="u_nombre" placeholder="Ej: Juan Pérez"/></div>' +
-      '<div class="form-group"><label>Nombre de usuario <span class="req">*</span></label>' +
-        '<input type="text" id="u_username" placeholder="Ej: jperez" ' + (esEdicion ? 'readonly style="background:var(--gris6)"' : '') + '/></div>' +
+      '<div class="form-group"><label>Correo electrónico <span class="req">*</span></label>' +
+        '<input type="email" id="u_correo" placeholder="coordinador@sit.gob.hn" ' + (esEdicion ? 'readonly style="background:var(--gris6)"' : '') + '/></div>' +
     '</div>' +
     '<div class="form-grid g2" style="margin-top:12px">' +
       '<div class="form-group"><label>Unidad <span class="req">*</span></label>' +
@@ -2401,28 +2412,30 @@ function abrirModalUsuario(id) {
     '</div>' +
     (!esEdicion ? '<div class="form-grid g2" style="margin-top:12px">' +
       '<div class="form-group"><label>Contraseña <span class="req">*</span></label>' +
-        '<input type="password" id="u_pass" placeholder="Mínimo 6 caracteres"/></div>' +
+        '<input type="password" id="u_pass" placeholder="Mínimo 8 caracteres"/></div>' +
       '<div class="form-group"><label>Confirmar contraseña <span class="req">*</span></label>' +
         '<input type="password" id="u_pass2" placeholder="Repita la contraseña"/></div>' +
     '</div>' : '') +
+    '<div style="margin-top:10px;padding:8px 12px;background:var(--az7);border-radius:6px;font-size:10px;color:var(--az2);">' +
+      (esEdicion
+        ? '⚠️ El correo no se puede cambiar. Para cambiar contraseña use el botón "Cambiar contraseña" en la tabla.'
+        : '🔐 La contraseña se guarda cifrada en Supabase Auth — nunca en texto plano ni visible en el código.') +
+    '</div>' +
   '</div>';
 
-  // Reutilizar modal principal
   document.getElementById('modalTitle').textContent = esEdicion ? 'Editar Usuario' : 'Nuevo Usuario';
   document.getElementById('modalBody').innerHTML = body;
   document.getElementById('modalOverlay').classList.add('open');
 
-  // Sobrescribir temporalmente el botón guardar
   var btnGuardar = document.querySelector('.modal-footer .btn-primary');
   btnGuardar.onclick = function() { guardarUsuario(id); };
 
-  // Si es edición, cargar datos actuales
   if (esEdicion) {
     supaGet('usuarios', 'select=*&id=eq.' + id).then(function(rows) {
       if (!rows || !rows[0]) return;
       var u = rows[0];
       document.getElementById('u_nombre').value   = u.nombre;
-      document.getElementById('u_username').value = u.username;
+      document.getElementById('u_correo').value   = u.correo  || '';
       document.getElementById('u_unidad').value   = u.unidad;
       document.getElementById('u_rol').value      = u.rol;
     });
@@ -2431,25 +2444,40 @@ function abrirModalUsuario(id) {
 
 async function guardarUsuario(id) {
   var nombre   = (document.getElementById('u_nombre').value || '').trim();
-  var username = (document.getElementById('u_username').value || '').trim().toLowerCase();
+  var correo   = (document.getElementById('u_correo').value || '').trim().toLowerCase();
   var unidad   = document.getElementById('u_unidad').value;
   var rol      = document.getElementById('u_rol').value;
   var esEdicion = !!id;
 
-  if (!nombre || !username || !unidad) {
+  if (!nombre || !correo || !unidad) {
     showToast('Complete los campos obligatorios.', 'err');
     return;
   }
 
-  var rowData = { nombre: nombre, username: username, unidad: unidad, rol: rol };
+  var rowData = { nombre: nombre, correo: correo, unidad: unidad, rol: rol };
 
   if (!esEdicion) {
     var pass  = document.getElementById('u_pass').value;
     var pass2 = document.getElementById('u_pass2').value;
-    if (!pass || pass.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', 'err'); return; }
+    if (!pass || pass.length < 8) { showToast('La contraseña debe tener al menos 8 caracteres.', 'err'); return; }
     if (pass !== pass2)           { showToast('Las contraseñas no coinciden.', 'err'); return; }
-    rowData.password = await sha256hex(pass);
-    rowData.activo   = true;
+
+    // ── Crear usuario en Supabase Auth (contraseña cifrada en Supabase, nunca visible)
+    var signupResp = await fetch(SUPA_AUTH_URL + '/admin/users', {
+      method: 'POST',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + _authToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: correo, password: pass, email_confirm: true })
+    });
+    var signupData = await signupResp.json();
+
+    if (!signupResp.ok) {
+      showToast('Error al crear en Auth: ' + (signupData.message || signupData.msg || 'Error desconocido'), 'err');
+      return;
+    }
+
+    // Guardar el ID de Auth en nuestra tabla de perfiles
+    rowData.id     = signupData.id;
+    rowData.activo = true;
   }
 
   try {
@@ -2457,17 +2485,14 @@ async function guardarUsuario(id) {
       await supaPatch('usuarios', id, rowData);
       showToast('Usuario actualizado correctamente.', 'ok');
     } else {
-      var newId = genUUID();
-      rowData.id = newId;
       await supaPost('usuarios', rowData);
-      showToast('Usuario creado. Puede iniciar sesión de inmediato.', 'ok');
+      showToast('Usuario creado. Ya puede iniciar sesión con su correo y contraseña.', 'ok');
     }
     closeModal();
-    // Restaurar onclick del botón guardar al original
     document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
     renderUsuariosPanel();
   } catch(e) {
-    showToast('Error al guardar: ' + e.message, 'err');
+    showToast('Error al guardar perfil: ' + e.message, 'err');
   }
 }
 
@@ -2483,14 +2508,22 @@ async function cambiarEstadoUsuario(id, nuevoEstado) {
   }
 }
 
-async function cambiarPasswordUsuario(id, username) {
-  var newPass = prompt('Nueva contraseña para "' + username + '" (mínimo 6 caracteres):');
+async function cambiarPasswordUsuario(id, correo) {
+  var newPass = prompt('Nueva contraseña para "' + correo + '" (mínimo 8 caracteres):');
   if (!newPass) return;
-  if (newPass.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', 'err'); return; }
+  if (newPass.length < 8) { showToast('La contraseña debe tener al menos 8 caracteres.', 'err'); return; }
   try {
-    var hash = await sha256hex(newPass);
-    await supaPatch('usuarios', id, { password: hash });
-    showToast('Contraseña actualizada para ' + username + '.', 'ok');
+    // Actualizar contraseña en Supabase Auth via Admin API
+    var resp = await fetch(SUPA_AUTH_URL + '/admin/users/' + id, {
+      method: 'PUT',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + _authToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: newPass })
+    });
+    if (!resp.ok) {
+      var d = await resp.json();
+      throw new Error(d.message || d.msg || 'Error al actualizar');
+    }
+    showToast('Contraseña actualizada para ' + correo + '.', 'ok');
   } catch(e) {
     showToast('Error: ' + e.message, 'err');
   }
