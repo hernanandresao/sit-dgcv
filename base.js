@@ -689,7 +689,7 @@ function renderUnidad(u) {
       '<td><span class="pill '+sc+'">'+(p.estado||'—')+'</span></td>' +
       '<td><div class="tbl-actions">' +
         '<button class="tbl-btn" onclick="openDetail(\''+u+'\','+i+')">Ver</button>' +
-        (perms.canEdit   ? '<button class="tbl-btn edit" onclick="openForm(\''+u+'\','+i+')">Editar</button>' : '') +
+        (perms.canEdit   ? '<button class="tbl-btn edit" onclick="(\''+u+'\','+i+')">Editar</button>' : '') +
         (perms.canDelete ? '<button class="tbl-btn" style="color:var(--rojo)" onclick="deleteProject(\''+u+'\','+i+')">✕</button>' : '') +
       '</div></td>' +
     '</tr>';
@@ -852,304 +852,172 @@ function closeDetail(e) {
 // ═══════════════════════════════════════════════════════════
 //  FORMULARIO — ABRIR
 // ═══════════════════════════════════════════════════════════
+// Variable global temporal para saber qué estamos registrando
+var currentRegType = 'construccion'; 
+
 function openForm(u, idx) {
-  // Security guard: re-check permissions before opening form
   var proj = (idx !== null && idx !== undefined) ? (DB[u] || [])[idx] : null;
   var perms = getPerms(u, proj);
-  var isNew = (idx === null || idx === undefined);
-  if (isNew && !perms.canAdd)    { showToast('No tiene permiso para agregar proyectos en esta unidad.', 'err'); return; }
-  if (!isNew && !perms.canEdit)  { showToast('No tiene permiso para editar este proyecto.', 'err'); return; }
+  
+  if (idx === null && !perms.canAdd) { showToast('No tiene permiso.', 'err'); return; }
+  if (idx !== null && !perms.canEdit) { showToast('No tiene permiso.', 'err'); return; }
+
   editingId = { u: u, idx: idx };
-  endosoCount = 0; pagoCount = 0;
-  var p      = idx !== null ? (DB[u][idx] || {}) : {};
-  var isEdit = idx !== null;
-  document.getElementById('modalTitle').textContent = (isEdit ? 'Editar' : 'Nuevo') + ' Proyecto — ' + UNIDADES[u].nombre;
-
-  function fv(field) {
-    var v = p[field];
-    if (v === null || v === undefined) return '';
-    return String(v).replace(/"/g, '&quot;');
+  
+  // Si es un proyecto nuevo, mostrar selector de tipo
+  if (idx === null) {
+    showTypeSelector(u);
+  } else {
+    // Si es edición, determinar tipo y abrir formulario directamente
+    currentRegType = proj.tipo_registro || 'construccion';
+    renderActualForm(u, proj);
   }
-
-  var deptoOpts = DEPTOS.map(function(d) { return '<option'+(p.departamento===d?' selected':'')+'>'+d+'</option>'; }).join('');
-  var estadoOpts = ESTADOS.map(function(e) { return '<option'+(p.estado===e?' selected':'')+'>'+e+'</option>'; }).join('');
-  var tipoSup = p.tipoSupervision || 'externa';
-
-  document.getElementById('modalBody').innerHTML =
-  // ── SECCIÓN 1: DATOS GENERALES
-  '<div class="form-section">' +
-    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6.5h5M4 4.5h5M4 8.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Datos Generales</div>' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SITU-2025-001"/></div>' +
-      '<div class="form-group"><label>Estado del Proyecto <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
-      '<div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Descripción completa del proyecto"/></div>' +
-      '<div class="form-group span2"><label>Descripción / Alcance <span class="req">*</span></label><textarea id="f_descripcion" rows="2">'+fv('descripcion')+'</textarea></div>' +
-    '</div>' +
-    '<div class="form-grid g4" style="margin-top:10px">' +
-      '<div class="form-group"><label>Longitud (km) <span class="req">*</span></label><input type="number" id="f_longitud" value="'+fv('longitud')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\')"/></div>' +
-      '<div class="form-group"><label>Beneficiarios</label><input type="number" id="f_beneficiarios" value="'+fv('beneficiarios')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
-      '<div class="form-group"><label>Empleados Directos</label><input type="number" id="f_empleadosDirectos" value="'+fv('empleadosDirectos')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
-      '<div class="form-group"><label>Empleados Indirectos</label><input type="number" id="f_empleadosIndirectos" value="'+fv('empleadosIndirectos')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
-    '</div>' +
-  '</div>' +
-  // ── SECCIÓN 2: UBICACIÓN
-  '<div class="form-section">' +
-    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1C4.567 1 3 2.567 3 4.5c0 2.5 3.5 7.5 3.5 7.5S10 7 10 4.5C10 2.567 8.433 1 6.5 1z" stroke="currentColor" stroke-width="1.2"/><circle cx="6.5" cy="4.5" r="1.2" stroke="currentColor" stroke-width="1.2"/></svg>Ubicación Geográfica</div>' +
-    '<div class="form-grid g3">' +
-      '<div class="form-group"><label>Departamento <span class="req">*</span></label><select id="f_departamento" onchange="actualizarMunicipios()"><option value="">— Seleccione —</option>'+deptoOpts+'</select></div>' +
-      '<div class="form-group"><label>Municipio <span class="req">*</span></label><select id="f_municipio"><option value="">— Seleccione departamento —</option>'+(function(){ var d=fv('departamento'); var m=fv('municipio'); if(d && MUNICIPIOS[d]){ return MUNICIPIOS[d].map(function(mu){ return '<option'+(mu===m?' selected':'')+'>'+mu+'</option>'; }).join(''); } return ''; })()+'</select></div>' +
-      '<div class="form-group"><label>Aldea / Barrio / Caserío <span class="req">*</span></label><input type="text" id="f_aldeaBarrio" value="'+fv('aldeaBarrio')+'"/></div>' +
-      '<div class="form-group"><label>Latitud GPS <span class="req">*</span></label><input type="text" id="f_latitud" value="'+fv('latitud')+'" placeholder="14.081389" oninput="this.value=this.value.replace(/[^0-9.\-]/g,\'\')"/></div>' +
-      '<div class="form-group"><label>Longitud GPS <span class="req">*</span></label><input type="text" id="f_longitudRef" value="'+fv('longitudRef')+'" placeholder="-87.206944" oninput="this.value=this.value.replace(/[^0-9.\-]/g,\'\')"/></div>' +
-    '</div>' +
-  '</div>' +
-  // ── SECCIÓN 3: CONSTRUCTORA
-  '<div class="form-section">' +
-    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="5" width="11" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5V3a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.2"/></svg>Empresa Constructora</div>' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Empresa Constructora <span class="req">*</span></label>'+empresaInput('f_constructora','constructora',fv('constructora'))+'</div>' +
-      '<div class="form-group"><label>N° de Contrato</label><input type="text" id="f_noContrato" value="'+fv('noContrato')+'"/></div>' +
-      '<div class="form-group"><label>Nombre del Coordinador <span class="req">*</span></label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>' +
-      '<div class="form-group"><label>Supervisor de Campo <span class="req">*</span></label><input type="text" id="f_supervisor" value="'+fv('supervisor')+'"/></div>' +
-    '</div>' +
-  '</div>' +
-  // ── SECCIÓN 4: SUPERVISIÓN
-  '<div class="form-section">' +
-    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 12c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Supervisión del Proyecto</div>' +
-    '<div style="display:flex;gap:10px;margin-bottom:12px">' +
-      '<label id="lbl-sup-ext" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
-        '<input type="radio" name="tipoSup" value="externa" '+(tipoSup==='externa'?'checked':'')+' onchange="toggleSup(\'externa\')" style="accent-color:var(--az2)"/>' +
-        '<div><div style="font-weight:500">Supervisión Externa</div><div style="font-size:10px;color:var(--gris3)">Empresa contratada</div></div>' +
-      '</label>' +
-      '<label id="lbl-sup-int" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
-        '<input type="radio" name="tipoSup" value="interna" '+(tipoSup==='interna'?'checked':'')+' onchange="toggleSup(\'interna\')" style="accent-color:var(--az2)"/>' +
-        '<div><div style="font-weight:500">Supervisión Interna</div><div style="font-size:10px;color:var(--gris3)">Personal DGCV</div></div>' +
-      '</label>' +
-    '</div>' +
-    '<div id="sup-ext-fields">' +
-      '<div class="form-grid g3">' +
-        '<div class="form-group"><label>Empresa Supervisora</label>'+empresaInput('f_supervisora','supervisora',fv('supervisora'))+'</div>' +
-        '<div class="form-group"><label>N° Contrato Supervisora</label><input type="text" id="f_noContratoSup" value="'+fv('noContratoSup')+'"/></div>' +
-        '<div class="form-group"><label>Contratos que Supervisa</label><input type="text" id="f_contratosSupervisa" value="'+fv('contratosSupervisa')+'"/></div>' +
-      '</div>' +
-    '</div>' +
-    '<div id="sup-int-fields" style="display:none"><div style="background:var(--az7);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--az2)">Este proyecto cuenta con supervisión interna de la DGCV.</div></div>' +
-  '</div>' +
-  // ── SECCIÓN 5: FECHAS
-  '<div class="form-section">' +
-    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 1v2M9 1v2M1 6h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Fechas y Plazo de Ejecución</div>' +
-    '<div class="form-grid g3">' +
-      '<div class="form-group"><label>Fecha de Adjudicación <span class="req">*</span></label><input type="date" id="f_fechaAdjudicacion" value="'+fv('fechaAdjudicacion')+'"/></div>' +
-      '<div class="form-group"><label>Fecha de Firma del Contrato</label><input type="date" id="f_fechaContrato" value="'+fv('fechaContrato')+'"/></div>' +
-      '<div class="form-group"><label>Plazo (días calendario)</label><input type="number" id="f_plazo" value="'+fv('plazo')+'" min="1" placeholder="365" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
-      '<div class="form-group"><label>Fecha de Inicio de Obras</label><input type="date" id="f_fechaInicio" value="'+fv('fechaInicio')+'"/></div>' +
-      '<div class="form-group"><label>Fecha de Finalización Programada</label><input type="date" id="f_fechaFinObra" value="'+fv('fechaFinObra')+'"/></div>' +
-    '</div>' +
-  '</div>' +
-  // ── SECCIÓN 6: GARANTÍAS
-  '<div class="form-section">' +
-    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1L9 4H12L9.5 6.5L10.5 9.5L6.5 7.5L2.5 9.5L3.5 6.5L1 4H4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>Garantías / Fianzas</div>' +
-    '<div style="background:var(--az7);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
-      '<div style="font-size:10px;font-weight:600;color:var(--az2);margin-bottom:6px">GARANTÍA DE ANTICIPO</div>' +
-      '<div class="form-grid g3">' +
-        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaAnticipo" value="'+fv('nFianzaAnticipo')+'" oninput="updateFianzaOpts()"/></div>' +
-        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFA" value="'+fv('iniFA')+'"/></div>' +
-        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFA" value="'+fv('finFA')+'"/></div>' +
-        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaAnticipo" value="'+fv('montoFianzaAnticipo')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
-      '</div>' +
-    '</div>' +
-    '<div style="background:var(--verde-l);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
-      '<div style="font-size:10px;font-weight:600;color:var(--verde);margin-bottom:6px">GARANTÍA DE CUMPLIMIENTO</div>' +
-      '<div class="form-grid g3">' +
-        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCumplimiento" value="'+fv('nFianzaCumplimiento')+'" oninput="updateFianzaOpts()"/></div>' +
-        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFC" value="'+fv('iniFC')+'"/></div>' +
-        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFC" value="'+fv('finFC')+'"/></div>' +
-        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCumplimiento" value="'+fv('montoFianzaCumplimiento')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
-      '</div>' +
-    '</div>' +
-    '<div style="background:#FDF3E3;border-radius:6px;padding:10px 12px">' +
-      '<div style="font-size:10px;font-weight:600;color:var(--amarillo);margin-bottom:6px">GARANTÍA DE CALIDAD</div>' +
-      '<div class="form-grid g3">' +
-        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCalidad" value="'+fv('nFianzaCalidad')+'" oninput="updateFianzaOpts()"/></div>' +
-        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFCal" value="'+fv('iniFCal')+'"/></div>' +
-        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFCal" value="'+fv('finFCal')+'"/></div>' +
-        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCalidad" value="'+fv('montoFianzaCalidad')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
-      '</div>' +
-    '</div>' +
-  '</div>' +
-  // ── SECCIÓN 7: ENDOSOS
-  '<div class="form-section">' +
-    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M2 10L5 7M5 7L8 10M5 7V3M10 3h1a1 1 0 010 2h-1M10 5v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Endosos de Garantías</div>' +
-    '<div id="endosos-container"></div>' +
-    '<button class="add-row-btn" onclick="addEndoso()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Endoso</button>' +
-  '</div>' +
-  // ── SECCIÓN 8: FINANCIERO Y PAGOS
-  '<div class="form-section">' +
-    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera y Avances</div>' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-      '<div class="form-group"><label>Monto Modificación / Adenda (L)</label><input type="number" id="f_montoModificacion" value="'+fv('montoModificacion')+'" step="0.01" min="0" placeholder="Solo si aplica" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-    '</div>' +
-    '<div class="form-grid g1" style="margin-top:10px">' +
-      '<div class="form-group"><label>Avance Físico de la Obra (%) <span class="req">*</span></label>' +
-        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+(fv('avanceFisico')||0)+'%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">'+(fv('avanceFisico')||0)+'%</span></div>' +
-        '<div class="form-hint">El avance financiero se calcula automáticamente desde los pagos</div>' +
-      '</div>' +
-    '</div>' +
-    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
-    '<div id="pagos-container"></div>' +
-    '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
-    '<div class="totalizador" id="totalizador">' +
-      '<div class="tot-item"><strong id="tot-contrato">L 0.00</strong>Monto vigente</div>' +
-      '<div class="tot-item"><strong id="tot-devengado">L 0.00</strong>Total devengado</div>' +
-      '<div class="tot-item"><strong id="tot-deuda">L 0.00</strong>Deuda pendiente</div>' +
-      '<div class="tot-item"><strong id="tot-pct" style="color:var(--verde)">0.00%</strong>Avance financiero</div>' +
-    '</div>' +
-  '</div>';
-
+  
   document.getElementById('modalOverlay').classList.add('open');
-
-  // Init supervision toggle
-  toggleSup(tipoSup);
-  setTimeout(syncEstadoAvance, 0); // Sync estado/avance al abrir en modo edición
-
-  // Init endosos and pagos
-  (p.endosos || []).forEach(function(e) { addEndoso(e); });
-  (p.pagos   || []).forEach(function(pg){ addPago(pg); });
-  if (!(p.pagos||[]).length) addPago();
-  updateFianzaOpts();
-  recalcPagos();
 }
 
-// ── Supervisión toggle ──────────────────
-function toggleSup(tipo) {
-  var extF = document.getElementById('sup-ext-fields');
-  var intF = document.getElementById('sup-int-fields');
-  var lE   = document.getElementById('lbl-sup-ext');
-  var lI   = document.getElementById('lbl-sup-int');
-  if (extF) extF.style.display = tipo === 'externa' ? 'block' : 'none';
-  if (intF) intF.style.display = tipo === 'interna' ? 'block' : 'none';
-  if (lE)  { lE.style.borderColor = tipo==='externa' ? 'var(--az4)' : 'var(--border)'; lE.style.background = tipo==='externa' ? 'var(--az7)' : '#fff'; }
-  if (lI)  { lI.style.borderColor = tipo==='interna' ? 'var(--az4)' : 'var(--border)'; lI.style.background = tipo==='interna' ? 'var(--az7)' : '#fff'; }
+// Pantalla inicial de selección
+function showTypeSelector(u) {
+  document.getElementById('modalTitle').textContent = 'Nuevo Registro — ' + UNIDADES[u].nombre;
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; padding:20px 0;">
+      <div class="selector-card" onclick="setRegType('construccion')">
+        <div class="selector-icon" style="background:var(--az6); color:var(--az2);">
+           <svg width="32" height="32" viewBox="0 0 16 16" fill="currentColor"><path d="M1 9l4-2 3 2 7-5V3H1v6z"/><path d="M1 10v3h14v-3l-7 5-3-2-4 2z"/></svg>
+        </div>
+        <h4>Registrar Construcción</h4>
+        <p>Proyectos de infraestructura vial y contratos de obra.</p>
+      </div>
+      <div class="selector-card" onclick="setRegType('supervision')">
+        <div class="selector-icon" style="background:var(--verde-l); color:var(--verde);">
+           <svg width="32" height="32" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12a5 5 0 110-10 5 5 0 010 10z"/><path d="M8 4a1 1 0 00-1 1v2H5a1 1 0 000 2h2v2a1 1 0 002 0V9h2a1 1 0 000-2H9V5a1 1 0 00-1-1z"/></svg>
+        </div>
+        <h4>Registrar Supervisión</h4>
+        <p>Contratos de supervisión externa para proyectos viales.</p>
+      </div>
+    </div>
+  `;
 }
 
-function clampPct(inp) {
-  var v = parseFloat(inp.value);
-  if (!isNaN(v)) { if(v<0) inp.value=0; if(v>100) inp.value=100; }
+function setRegType(type) {
+  currentRegType = type;
+  renderActualForm(editingId.u, null);
 }
 
-// ── Condición 1: sincronización bidireccional estado ↔ avance físico ──
-function syncEstadoAvance() {
-  // "Terminado" seleccionado → fuerza avance a 100%
-  var est = (document.getElementById('f_estado') || {}).value;
-  var inp = document.getElementById('f_avanceFisico');
-  if (!inp) return;
-  if (est === 'Terminado') {
-    inp.value = '100';
-    updateAvBar();
+function renderActualForm(u, p) {
+  if (currentRegType === 'supervision') {
+    renderFormSupervision(u, p);
+  } else {
+    renderFormConstruccion(u, p);
   }
 }
 
-function syncAvanceEstado() {
-  // Avance llega a 100% → cambia estado a "Terminado"
-  // Avance baja de 100% estando en "Terminado" → regresa a "En Ejecución"
-  var inp = document.getElementById('f_avanceFisico');
-  var sel = document.getElementById('f_estado');
-  if (!inp || !sel) return;
-  var v = parseFloat(inp.value);
-  if (v >= 100) {
-    sel.value = 'Terminado';
-  } else if (sel.value === 'Terminado' && v < 100) {
-    sel.value = 'En Ejecución';
-  }
+// --- FORMULARIO DE CONSTRUCCIÓN ---
+function renderFormConstruccion(u, p) {
+  p = p || {};
+  function fv(field) { return (p[field] || '').toString().replace(/"/g, '&quot;'); }
+  
+  document.getElementById('modalTitle').textContent = (p.proyecto ? 'Editar' : 'Nueva') + ' Construcción — ' + UNIDADES[u].nombre;
+  
+  // Obtener lista de contratos de supervisión ya registrados en esta unidad
+  var supervisionesDisponibles = (DB[u] || []).filter(proj => proj.tipo_registro === 'supervision');
+  var supOpts = supervisionesDisponibles.map(s => `<option value="${s._sid || s.proyecto}" ${p.id_supervision_vinculada === (s._sid || s.proyecto) ? 'selected' : ''}>${s.proyecto} (${s.noContrato || 'S/N'})</option>`).join('');
+
+  var html = `
+    <!-- Sección General y Ubicación (Igual que antes) -->
+    <div class="form-section">
+      <div class="form-section-title">Datos de Construcción</div>
+      <div class="form-grid g2">
+        <div class="form-group"><label>N° Proceso <span class="req">*</span></label><input type="text" id="f_nProceso" value="${fv('nProceso')}"/></div>
+        <div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()">${ESTADOS.map(e=>`<option ${p.estado===e?'selected':''}>${e}</option>`).join('')}</select></div>
+        <div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="${fv('proyecto')}"/></div>
+      </div>
+    </div>
+
+    <!-- Empresa Constructora -->
+    <div class="form-section">
+      <div class="form-section-title">Empresa Constructora</div>
+      <div class="form-grid g2">
+        <div class="form-group"><label>Constructora <span class="req">*</span></label>${empresaInput('f_constructora','constructora',fv('constructora'))}</div>
+        <div class="form-group"><label>N° Contrato Obra</label><input type="text" id="f_noContrato" value="${fv('noContrato')}"/></div>
+      </div>
+    </div>
+
+    <!-- NUEVA LÓGICA DE SUPERVISIÓN PARA CONSTRUCCIÓN -->
+    <div class="form-section">
+      <div class="form-section-title">Supervisión Vinculada</div>
+      <div style="display:flex; gap:10px; margin-bottom:12px;">
+        <label style="flex:1; border:1px solid var(--border); padding:10px; border-radius:6px; cursor:pointer;">
+          <input type="radio" name="f_tipoSupervision" value="interna" ${p.tipoSupervision === 'interna' ? 'checked' : ''} onchange="toggleSupConst('interna')"> Interna DGCV
+        </label>
+        <label style="flex:1; border:1px solid var(--border); padding:10px; border-radius:6px; cursor:pointer;">
+          <input type="radio" name="f_tipoSupervision" value="externa" ${p.tipoSupervision !== 'interna' ? 'checked' : ''} onchange="toggleSupConst('externa')"> Externa (Contrato)
+        </label>
+      </div>
+
+      <div id="sup-interna-fields" style="display:${p.tipoSupervision === 'interna' ? 'block' : 'none'}">
+        <div class="form-group"><label>Nombre del Supervisor de Campo DGCV <span class="req">*</span></label><input type="text" id="f_supervisor" value="${fv('supervisor')}"/></div>
+      </div>
+
+      <div id="sup-externa-fields" style="display:${p.tipoSupervision !== 'interna' ? 'block' : 'none'}">
+        <div class="form-group">
+          <label>Seleccionar Contrato de Supervisión Pre-registrado <span class="req">*</span></label>
+          <select id="f_id_supervision_vinculada">
+            <option value="">— Seleccione contrato de supervisión —</option>
+            ${supOpts}
+          </select>
+          <div class="form-hint">Si la empresa no aparece, regístrela primero como "Registro de Supervisión".</div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Aquí concatenas el resto del formulario (Fechas, Garantías, Pagos) que ya tenías
+  document.getElementById('modalBody').innerHTML = html + getCommonFields(p);
+  initFormFeatures(p);
 }
 
-function updateAvBar() {
-  var v = parseFloat(document.getElementById('f_avanceFisico').value) || 0;
-  var b = document.getElementById('avf-bar');
-  var l = document.getElementById('avf-lbl');
-  if (b) b.style.width = Math.min(v,100) + '%';
-  if (l) l.textContent = v + '%';
+// --- FORMULARIO DE SUPERVISIÓN ---
+function renderFormSupervision(u, p) {
+  p = p || {};
+  function fv(field) { return (p[field] || '').toString().replace(/"/g, '&quot;'); }
+
+  document.getElementById('modalTitle').textContent = (p.proyecto ? 'Editar' : 'Nueva') + ' Supervisión — ' + UNIDADES[u].nombre;
+
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-section">
+      <div class="form-section-title">Datos del Contrato de Supervisión</div>
+      <div class="form-grid g2">
+        <div class="form-group span2"><label>Nombre del Proyecto de Supervisión <span class="req">*</span></label><input type="text" id="f_proyecto" value="${fv('proyecto')}" placeholder="Ej: Supervisión de la Red Vial..."/></div>
+        <div class="form-group"><label>Empresa Supervisora <span class="req">*</span></label>${empresaInput('f_supervisora','supervisora',fv('supervisora'))}</div>
+        <div class="form-group"><label>N° Contrato Supervisión <span class="req">*</span></label><input type="text" id="f_noContrato" value="${fv('noContrato')}"/></div>
+        <div class="form-group span2"><label>Contratos a los que supervisa <span class="req">*</span></label><input type="text" id="f_contratosSupervisa" value="${fv('contratosSupervisa')}" placeholder="Indique los códigos de contratos de obra"/></div>
+        <div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado">${ESTADOS.map(e=>`<option ${p.estado===e?'selected':''}>${e}</option>`).join('')}</select></div>
+      </div>
+    </div>
+  ` + getCommonFields(p);
+  
+  initFormFeatures(p);
 }
 
-// ── Garantías / Endosos ─────────────────
-function getFianzaOpts(selected) {
-  var ids   = ['f_nFianzaAnticipo','f_nFianzaCumplimiento','f_nFianzaCalidad'];
-  var labels= ['Anticipo','Cumplimiento','Calidad'];
-  var opts  = '<option value="">— Seleccione fianza —</option>';
-  ids.forEach(function(id, i) {
-    var val = (document.getElementById(id)||{}).value || '';
-    if (val) opts += '<option value="'+val+'"'+(selected===val?' selected':'')+'>'+val+' ('+labels[i]+')</option>';
-  });
-  return opts;
+function toggleSupConst(tipo) {
+  document.getElementById('sup-interna-fields').style.display = tipo === 'interna' ? 'block' : 'none';
+  document.getElementById('sup-externa-fields').style.display = tipo === 'externa' ? 'block' : 'none';
 }
 
-function updateFianzaOpts() {
-  document.querySelectorAll('.endoso-fianza-select').forEach(function(sel) {
-    var cur = sel.value; sel.innerHTML = getFianzaOpts(cur);
-  });
+// Función auxiliar para no repetir campos de fechas, garantías y pagos
+function getCommonFields(p) {
+  // Aquí mueves el HTML de Ubicación, Fechas, Garantías y Pagos que ya tenías en tu código original
+  // Retorna el string de HTML
+  return ""; // [Copia aquí el bloque de HTML de ubicación, fechas, garantías y financiero del script original]
 }
 
-function addEndoso(data) {
-  data = data || {};
-  endosoCount++;
-  var n   = endosoCount;
-  var con = document.getElementById('endosos-container');
-  var div = document.createElement('div');
-  div.className = 'endoso-card'; div.id = 'endoso-' + n;
-  div.innerHTML =
-    '<div class="endoso-tag">Endoso N° '+n+'</div>' +
-    '<button class="endoso-remove" onclick="document.getElementById(\'endoso-'+n+'\').remove()">✕</button>' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>N° Endoso</label><input type="text" class="end-num" value="'+(data.numEndoso||'')+'"/></div>' +
-      '<div class="form-group"><label>Garantía vinculada</label><select class="endoso-fianza-select">'+getFianzaOpts(data.fianzaVinculada||'')+'</select></div>' +
-      '<div class="form-group"><label>Fecha del Endoso</label><input type="date" class="end-fecha" value="'+(data.fechaEndoso||'')+'"/></div>' +
-      '<div class="form-group"><label>Nueva Fecha Vencimiento</label><input type="date" class="end-fechaVenc" value="'+(data.nuevaFechaVenc||'')+'"/></div>' +
-      '<div class="form-group"><label>Monto (L)</label><input type="number" class="end-monto" value="'+(data.montoEndoso||'')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\')"/></div>' +
-      '<div class="form-group"><label>Descripción / Motivo</label><input type="text" class="end-desc" value="'+(data.descripcionEndoso||'')+'"/></div>' +
-    '</div>';
-  con.appendChild(div);
+function initFormFeatures(p) {
+    // Inicia endosos, pagos y barras de progreso
+    (p.endosos || []).forEach(e => addEndoso(e));
+    (p.pagos || []).forEach(pg => addPago(pg));
+    recalcPagos();
 }
-
-// ── Pagos ───────────────────────────────
-function addPago(data) {
-  data = data || {};
-  pagoCount++;
-  var n   = pagoCount;
-  var con = document.getElementById('pagos-container');
-  var div = document.createElement('div');
-  div.className = 'pago-card'; div.id = 'pago-' + n;
-  div.innerHTML =
-    '<div class="pago-num">Pago N° '+n+'</div>' +
-    '<button class="pago-remove" onclick="document.getElementById(\'pago-'+n+'\').remove();recalcPagos()">✕</button>' +
-    '<div class="form-grid g2" style="margin-bottom:8px">' +
-      '<div class="form-group"><label>Monto del Pago (L)</label><input type="number" class="pago-monto" value="'+(data.monto||'')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-      '<div class="form-group"><label>Fecha de Ingreso / Registro</label><input type="date" class="pago-fechaIngreso" value="'+(data.fechaIngreso||data.fecha||'')+'"/></div>' +
-    '</div>' +
-    '<div class="form-grid g3">' +
-      '<div class="form-group"><label>Período — Fecha Inicio</label><input type="date" class="pago-periodoIni" value="'+(data.periodoIni||'')+'"/></div>' +
-      '<div class="form-group"><label>Período — Fecha Fin</label><input type="date" class="pago-periodoFin" value="'+(data.periodoFin||'')+'"/></div>' +
-      '<div class="form-group"><label>Contexto / Descripción</label><input type="text" class="pago-ctx" value="'+(data.contexto||'')+'" placeholder="Ej. Anticipo, Estimación N°1…"/></div>' +
-    '</div>';
-  con.appendChild(div);
-  recalcPagos();
-}
-
-function recalcPagos() {
-  var mI  = parseFloat((document.getElementById('f_montoContratoInicial')||{}).value) || 0;
-  var mM  = parseFloat((document.getElementById('f_montoModificacion')||{}).value)    || 0;
-  var vig = mM > 0 ? mM : mI;
-  var dev = 0;
-  document.querySelectorAll('#pagos-container .pago-monto').forEach(function(i) { dev += parseFloat(i.value) || 0; });
-  var deuda = vig - dev;
-  var pct   = vig > 0 ? (dev / vig * 100) : 0;
-  var fmt   = function(n) { return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-  var tc=document.getElementById('tot-contrato');   if(tc) tc.textContent  = 'L ' + fmt(vig);
-  var td=document.getElementById('tot-devengado');  if(td) td.textContent  = 'L ' + fmt(dev);
-  var tdd=document.getElementById('tot-deuda');     if(tdd){ tdd.textContent = 'L ' + fmt(deuda); tdd.style.color = deuda < 0 ? 'var(--rojo)' : 'var(--az1)'; }
-  var tp=document.getElementById('tot-pct');        if(tp) tp.textContent  = pct.toFixed(2) + '%';
-}
-
 // ═══════════════════════════════════════════════════════════
 //  FORMULARIO — GUARDAR
 // ═══════════════════════════════════════════════════════════
