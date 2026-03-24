@@ -1,12 +1,29 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════
-//  SUPABASE — API REST directa (sin librería externa)
+//  SUPABASE — configuración
 // ═══════════════════════════════════════════════════════════
-var SUPA_URL = 'https://furbzmtimdvsterqenff.supabase.co/rest/v1';
-var SUPA_KEY = 'sb_publishable_v7rjxV61uvkibEfTDo6gJA_78Rzsocm';
+var SUPA_PROJECT = 'https://furbzmtimdvsterqenff.supabase.co';
+var SUPA_URL     = SUPA_PROJECT + '/rest/v1';
+var SUPA_AUTH    = SUPA_PROJECT + '/auth/v1';
+var SUPA_KEY     = 'sb_publishable_v7rjxV61uvkibEfTDo6gJA_78Rzsocm';
 
-// Generar UUID en el cliente — evita depender de Supabase para obtener el ID
+// JWT del usuario autenticado — se actualiza en cada login, se borra en logout
+var currentToken = null;
+
+// Construye cabeceras usando el JWT del usuario (si existe) o la clave anon
+function buildHeaders(write) {
+  var bearer = currentToken ? currentToken : SUPA_KEY;
+  var h = {
+    'apikey':        SUPA_KEY,
+    'Authorization': 'Bearer ' + bearer,
+    'Content-Type':  'application/json'
+  };
+  if (write) h['Prefer'] = 'return=minimal';
+  return h;
+}
+
+// Generar UUID en el cliente
 function genUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     var r = Math.random() * 16 | 0;
@@ -14,21 +31,9 @@ function genUUID() {
   });
 }
 
-// SHA-256 via Web Crypto API (todos los navegadores modernos lo tienen)
-async function sha256hex(msg) {
-  var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
-  return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
-}
-
-var H_BASE  = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
-// x-app-secret: cabecera de firma para operaciones de escritura — debe coincidir con la política RLS
-var APP_SECRET = 'SIT_DGCV_2025_SECRET';
-var H_WRITE = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal', 'x-app-secret': APP_SECRET });
-var H_DEL   = Object.assign({}, H_BASE, { 'Prefer': 'return=minimal', 'x-app-secret': APP_SECRET });
-
 function supaGet(table, query) {
   return fetch(SUPA_URL + '/' + table + '?' + (query || ''), {
-    method: 'GET', headers: H_BASE
+    method: 'GET', headers: buildHeaders(false)
   }).then(function(r) {
     return r.text().then(function(t) {
       if (!r.ok) throw new Error('GET ' + table + ' [' + r.status + ']: ' + t);
@@ -39,18 +44,17 @@ function supaGet(table, query) {
 
 function supaPost(table, body) {
   return fetch(SUPA_URL + '/' + table, {
-    method: 'POST', headers: H_WRITE, body: JSON.stringify(body)
+    method: 'POST', headers: buildHeaders(true), body: JSON.stringify(body)
   }).then(function(r) {
     return r.text().then(function(t) {
       if (!r.ok) throw new Error('POST ' + table + ' [' + r.status + ']: ' + t);
-      // return=minimal → 201 sin body, el ID ya lo generamos nosotros
     });
   });
 }
 
 function supaPatch(table, id, body) {
   return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
-    method: 'PATCH', headers: H_WRITE, body: JSON.stringify(body)
+    method: 'PATCH', headers: buildHeaders(true), body: JSON.stringify(body)
   }).then(function(r) {
     return r.text().then(function(t) {
       if (!r.ok) throw new Error('PATCH ' + table + ' [' + r.status + ']: ' + t);
@@ -60,7 +64,7 @@ function supaPatch(table, id, body) {
 
 function supaDelete(table, id) {
   return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
-    method: 'DELETE', headers: H_DEL
+    method: 'DELETE', headers: buildHeaders(true)
   }).then(function(r) {
     if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
   });
@@ -264,16 +268,19 @@ function empresaInput(id, tipo, valor) {
 // ═══════════════════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  AUTH — Supabase Auth (bcrypt, JWT)
+// ═══════════════════════════════════════════════════════════
 async function doLogin() {
   var unidad = document.getElementById('loginUnidad').value;
-  var user   = document.getElementById('loginUser').value.trim().toLowerCase();
+  var email  = (document.getElementById('loginEmail').value || '').trim().toLowerCase();
   var pass   = document.getElementById('loginPass').value;
   var err    = document.getElementById('loginError');
   var btn    = document.querySelector('.login-btn');
 
   err.style.display = 'none';
 
-  if (!unidad || !user || !pass) {
+  if (!unidad || !email || !pass) {
     err.style.display = 'block';
     err.textContent = 'Complete todos los campos.';
     return;
@@ -283,19 +290,39 @@ async function doLogin() {
   btn.disabled = true;
 
   try {
-    // Hash SHA-256 de la contrasena antes de comparar con la BD
-    var passHash = await sha256hex(pass);
+    // ── PASO 1: Autenticar con Supabase Auth (bcrypt server-side) ──
+    var authResp = await fetch(SUPA_AUTH + '/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: pass })
+    });
+    var authData = await authResp.json();
 
-    // Buscar usuario en Supabase
+    if (!authResp.ok) {
+      err.style.display = 'block';
+      err.textContent = 'Correo o contraseña incorrectos.';
+      btn.textContent = 'Ingresar al Sistema';
+      btn.disabled = false;
+      return;
+    }
+
+    // ── PASO 2: Guardar JWT y actualizar cabeceras ──
+    currentToken = authData.access_token;
+
+    // ── PASO 3: Cargar perfil del usuario desde la tabla usuarios ──
     var rows = await supaGet('usuarios',
-      'select=*&username=eq.' + encodeURIComponent(user) +
-      '&password=eq.' + encodeURIComponent(passHash) +
-      '&activo=eq.true'
+      'select=*&email=eq.' + encodeURIComponent(email) + '&activo=eq.true'
     );
 
     if (!rows || rows.length === 0) {
+      // Auth OK pero sin perfil activo — cerrar sesión en Supabase Auth
+      await fetch(SUPA_AUTH + '/logout', {
+        method: 'POST',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
+      });
+      currentToken = null;
       err.style.display = 'block';
-      err.textContent = 'Credenciales incorrectas o usuario inactivo.';
+      err.textContent = 'Usuario autenticado pero sin perfil activo en el sistema. Contacte al administrador.';
       btn.textContent = 'Ingresar al Sistema';
       btn.disabled = false;
       return;
@@ -303,37 +330,44 @@ async function doLogin() {
 
     var u = rows[0];
 
-    // Verificar que la unidad seleccionada coincide (admin puede elegir cualquiera)
+    // ── PASO 4: Verificar que la unidad coincide ──
     if (u.unidad !== 'admin' && u.unidad !== unidad) {
+      await fetch(SUPA_AUTH + '/logout', {
+        method: 'POST',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
+      });
+      currentToken = null;
       err.style.display = 'block';
-      err.textContent = 'El usuario no pertenece a la unidad seleccionada.';
+      err.textContent = 'Este usuario no pertenece a la unidad seleccionada.';
       btn.textContent = 'Ingresar al Sistema';
       btn.disabled = false;
       return;
     }
 
-    // Login exitoso — cargar proyectos
+    // ── PASO 5: Cargar datos y entrar al sistema ──
     btn.textContent = 'Cargando datos...';
     await cargarProyectos();
     await cargarEmpresas();
 
-    var efectiveUnidad = u.unidad === 'admin' ? unidad : u.unidad;
-    var esGlobalAdmin   = (u.unidad === 'admin' && u.rol === 'admin');   // Admin General → todo
-    var esGlobalViewer  = (u.unidad === 'admin' && u.rol !== 'admin');   // Coord. General → solo lectura
-    var esUnidadAdmin   = (u.unidad !== 'admin' && u.rol === 'admin');   // Admin de unidad → edita toda su unidad
-    var esUnidadCoord   = (u.unidad !== 'admin' && u.rol !== 'admin');   // Coord. de unidad → edita solo los suyos
+    var efectiveUnidad  = u.unidad === 'admin' ? unidad : u.unidad;
+    var esGlobalAdmin   = (u.unidad === 'admin' && u.rol === 'admin');
+    var esGlobalViewer  = (u.unidad === 'admin' && u.rol !== 'admin');
+    var esUnidadAdmin   = (u.unidad !== 'admin' && u.rol === 'admin');
+    var esUnidadCoord   = (u.unidad !== 'admin' && u.rol !== 'admin');
+
     currentUser = {
       id:            u.id,
+      email:         email,
       unidad:        efectiveUnidad,
       nombre:        u.nombre,
       rol:           UNIDAD_NOMBRES[efectiveUnidad] || u.unidad,
-      rolDB:         u.rol,                   // 'admin' | 'coordinador'
-      unidadDB:      u.unidad,                // unidad real de la BD (puede ser 'admin')
-      esAdmin:       esGlobalAdmin,           // acceso total + gestión usuarios
+      rolDB:         u.rol,
+      unidadDB:      u.unidad,
+      esAdmin:       esGlobalAdmin,
       esGlobalAdmin: esGlobalAdmin,
-      esGlobalViewer:esGlobalViewer,          // ve todo, edita nada
-      esUnidadAdmin: esUnidadAdmin,           // edita toda su unidad
-      esUnidadCoord: esUnidadCoord            // edita solo sus propios proyectos
+      esGlobalViewer:esGlobalViewer,
+      esUnidadAdmin: esUnidadAdmin,
+      esUnidadCoord: esUnidadCoord
     };
 
     document.getElementById('loginScreen').style.display = 'none';
@@ -347,7 +381,6 @@ async function doLogin() {
     if (syncStatus) syncStatus.style.display = 'flex';
     if (syncBtn)    syncBtn.style.display    = 'flex';
 
-    // Item de gestion de usuarios — solo visible para admins
     var navUsuarios        = document.getElementById('nav-usuarios');
     var navUsuariosSection = document.getElementById('nav-usuarios-section');
     var navEmpresas        = document.getElementById('nav-empresas');
@@ -357,36 +390,39 @@ async function doLogin() {
     var reportBtn = document.getElementById('reportBtn');
     if (reportBtn) reportBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
 
-    if (currentUser.esGlobalViewer) {
-      // Coord. General: ve todas las unidades pero sin opción de gestión de usuarios — nada se oculta en nav
-      // (nav-usuarios ya está oculto porque esAdmin=false)
-    } else if (!currentUser.esAdmin) {
-      // Coordinadores/admins de unidad: solo ven su unidad
+    if (!currentUser.esAdmin && !currentUser.esGlobalViewer) {
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
         var v = el.id.replace('nav-', '');
         if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos') el.style.display = 'none';
       });
     }
-    // esGlobalAdmin: no oculta nada
 
     updateBadges();
     showView('dashboard', document.getElementById('nav-dashboard'));
 
     btn.textContent = 'Ingresar al Sistema';
     btn.disabled = false;
-
-    showToast(dbOnline ? 'Bienvenido, ' + u.nombre + '.' : 'Sesion iniciada (sin conexion a BD).', dbOnline ? 'ok' : 'err');
+    showToast(dbOnline ? 'Bienvenido, ' + u.nombre + '.' : 'Sesión iniciada (sin conexión a BD).', dbOnline ? 'ok' : 'err');
 
   } catch(e) {
+    currentToken = null;
     err.style.display = 'block';
-    err.textContent = 'Error de conexion. Verifique su red.';
+    err.textContent = 'Error de conexión: ' + e.message;
     btn.textContent = 'Ingresar al Sistema';
     btn.disabled = false;
   }
 }
 
 function doLogout() {
-  currentUser = null;
+  // Invalidar JWT en Supabase Auth
+  if (currentToken) {
+    fetch(SUPA_AUTH + '/logout', {
+      method: 'POST',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
+    }).catch(function() {}); // silencioso — no bloquear el logout local
+  }
+  currentToken = null;
+  currentUser  = null;
   DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
   document.getElementById('appShell').style.display  = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
@@ -678,12 +714,9 @@ function renderUnidad(u) {
     var cPor = p.historial && p.historial.length ? p.historial[0].usuario : '—';
     var uMod  = p.historial && p.historial.length > 1 ? p.historial[p.historial.length-1] : null;
     var perms = getPerms(u, p);  // permisos individuales para este proyecto
-    var tipoBadge = p.tipoProyecto === 'supervision'
-      ? '<span style="background:#EDE5F5;color:#5C2E8A;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600">Supervisión</span>'
-      : '<span style="background:var(--az6);color:var(--az2);padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600">Construcción</span>';
     return '<tr>' +
       '<td style="font-family:var(--mono);color:var(--gris3);font-size:10px">'+(String(i+1).padStart(2,'0'))+'</td>' +
-      '<td style="max-width:200px"><div style="font-weight:500;font-size:12px;line-height:1.3">'+p.proyecto+'</div><div style="font-size:10px;color:var(--gris3);margin-top:2px">'+(p.departamento||'')+(p.municipio?' · '+p.municipio:'')+'</div><div style="margin-top:3px">'+tipoBadge+'</div></td>' +
+      '<td style="max-width:200px"><div style="font-weight:500;font-size:12px;line-height:1.3">'+p.proyecto+'</div><div style="font-size:10px;color:var(--gris3);margin-top:2px">'+(p.departamento||'')+(p.municipio?' · '+p.municipio:'')+'</div></td>' +
       '<td style="font-size:11px;color:var(--gris2)">'+(p.constructora||'—')+'</td>' +
       '<td><div style="font-size:11px;font-weight:500;color:var(--az2)">'+cPor+'</div>'+(uMod&&uMod.usuario!==cPor?'<div style="font-size:9px;color:var(--gris3)">Mod: '+uMod.usuario+'</div>':'')+'</td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill az-fill" style="width:'+Math.min(paf,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(paf.toFixed(1))+'%</div></td>' +
@@ -692,7 +725,7 @@ function renderUnidad(u) {
       '<td><span class="pill '+sc+'">'+(p.estado||'—')+'</span></td>' +
       '<td><div class="tbl-actions">' +
         '<button class="tbl-btn" onclick="openDetail(\''+u+'\','+i+')">Ver</button>' +
-        (perms.canEdit   ? '<button class="tbl-btn edit" onclick="openFormOrSelector(\''+u+'\','+i+')">Editar</button>' : '') +
+        (perms.canEdit   ? '<button class="tbl-btn edit" onclick="openForm(\''+u+'\','+i+')">Editar</button>' : '') +
         (perms.canDelete ? '<button class="tbl-btn" style="color:var(--rojo)" onclick="deleteProject(\''+u+'\','+i+')">✕</button>' : '') +
       '</div></td>' +
     '</tr>';
@@ -715,7 +748,7 @@ function renderUnidad(u) {
           '<option value="">Todos los estados</option>' +
           ESTADOS.map(function(e){ return '<option>'+e+'</option>'; }).join('') +
         '</select>' +
-        (permsNew.canAdd ? '<button class="btn btn-primary" onclick="openFormOrSelector(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
+        (permsNew.canAdd ? '<button class="btn btn-primary" onclick="openForm(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
       '</div>' +
       '<div style="overflow-x:auto"><table class="tbl" id="tbl-'+u+'">' +
         '<thead><tr><th>N°</th><th>Proyecto</th><th>Constructora</th><th>Registrado por</th><th>Av. Físico</th><th>Av. Financiero</th><th>N° Contrato</th><th>Estado</th><th>Acciones</th></tr></thead>' +
@@ -763,10 +796,6 @@ function openDetail(u, i) {
   var afin= calcAvFin(p);
   var cPor= p.historial && p.historial.length ? p.historial[0] : null;
   var uMod= p.historial && p.historial.length > 1 ? p.historial[p.historial.length-1] : null;
-  var esSupervision = p.tipoProyecto === 'supervision';
-  var tipoBadge = esSupervision
-    ? '<span style="background:#EDE5F5;color:#5C2E8A;padding:2px 10px;border-radius:10px;font-size:10px;font-weight:600">Supervisión</span>'
-    : '<span style="background:var(--az6);color:var(--az2);padding:2px 10px;border-radius:10px;font-size:10px;font-weight:600">Construcción</span>';
 
   var pagosHtml = (p.pagos||[]).length ? (p.pagos||[]).map(function(pg,idx) {
     return '<div style="background:var(--gris6);border-radius:5px;padding:8px 10px;margin-bottom:5px;">' +
@@ -793,91 +822,48 @@ function openDetail(u, i) {
     '</div>';
   }).join('') : '<div style="font-size:11px;color:var(--gris3)">Sin historial</div>';
 
-  // Contratos supervisados HTML (solo tipo supervisión)
-  var contratosSupHtml = '';
-  if (esSupervision && (p.contratosSupervisa||[]).length) {
-    contratosSupHtml = (p.contratosSupervisa||[]).map(function(c) {
-      return '<div style="background:var(--gris6);border-radius:5px;padding:7px 10px;margin-bottom:4px;font-size:11px;display:flex;justify-content:space-between">' +
-        '<span style="font-weight:500;font-family:var(--mono)">'+(c.nContrato||'—')+'</span>' +
-        '<span style="color:var(--gris2)">'+(c.descripcion||'')+'</span>' +
-      '</div>';
-    }).join('');
-  } else if (esSupervision) {
-    contratosSupHtml = '<div style="font-size:11px;color:var(--gris3)">Sin contratos registrados</div>';
-  }
-
   document.getElementById('dpBody').innerHTML =
-    // Header con tipo y estado
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">' +
-      tipoBadge +
       '<span class="pill '+sc+'">'+(p.estado||'—')+'</span>' +
       (cPor ? '<span style="font-size:10px;color:var(--gris3)">Creado por <strong style="color:var(--az2)">'+cPor.usuario+'</strong></span>' : '') +
     '</div>' +
     (uMod ? '<div style="background:var(--amarillo-l);border-radius:5px;padding:6px 10px;margin-bottom:10px;font-size:10px;color:var(--amarillo)">Última modificación por <strong>'+uMod.usuario+'</strong> · '+fmtFecha(uMod.fecha)+'</div>' : '') +
-
-    // Identificación
     '<div class="dp-section"><div class="dp-section-title">Identificación</div>' +
       dpRow('N° Proceso', p.nProceso) + dpRow('Descripción', p.descripcion) + dpRow('Longitud', p.longitud ? p.longitud+' km' : null) +
       dpRow('Beneficiarios', p.beneficiarios) + dpRow('Empleados Directos', p.empleadosDirectos) + dpRow('Empleados Indirectos', p.empleadosIndirectos) +
     '</div>' +
-
-    // Ubicación
     '<div class="dp-section"><div class="dp-section-title">Ubicación</div>' +
       dpRow('Departamento', p.departamento) + dpRow('Municipio', p.municipio) + dpRow('Aldea / Barrio', p.aldeaBarrio) +
     '</div>' +
-
-    // Empresa — varía según tipo
-    (esSupervision ?
-      '<div class="dp-section"><div class="dp-section-title" style="color:#5C2E8A">Empresa Supervisora</div>' +
-        dpRow('Empresa', p.supervisora) + dpRow('N° Contrato', p.noContrato) + dpRow('Coordinador', p.coordinador) +
-      '</div>' +
-      '<div class="dp-section"><div class="dp-section-title" style="color:#5C2E8A">Contratos de Construcción Supervisados ('+(p.contratosSupervisa||[]).length+')</div>' +
-        contratosSupHtml +
-      '</div>'
-    :
-      '<div class="dp-section"><div class="dp-section-title">Empresa Constructora</div>' +
-        dpRow('Empresa', p.constructora) + dpRow('N° Contrato', p.noContrato) + dpRow('Coordinador', p.coordinador) + dpRow('Supervisor de Campo', p.supervisor) +
-      '</div>' +
-      '<div class="dp-section"><div class="dp-section-title">Supervisión de la Obra</div>' +
-        '<div class="dp-row"><span class="dl">Tipo</span><span class="dv"><span style="background:'+(p.tipoSupervision==='interna'?'var(--verde-l)':'var(--az6)')+';color:'+(p.tipoSupervision==='interna'?'var(--verde)':'var(--az2)')+';padding:2px 8px;border-radius:8px;font-size:10px">'+(p.tipoSupervision==='interna'?'Supervisión Interna DGCV':'Supervisión Externa')+'</span></span></div>' +
-        (p.tipoSupervision==='interna'
-          ? dpRow('Supervisor de Campo (DGCV)', p.supervisorInterno||'—')
-          : dpRow('Empresa Supervisora', p.supervisora) +
-            dpRow('Contrato de Supervisión', p.noContratoSup||'—')) +
-      '</div>'
-    ) +
-
-    // Fechas
+    '<div class="dp-section"><div class="dp-section-title">Empresa Constructora</div>' +
+      dpRow('Empresa', p.constructora) + dpRow('N° Contrato', p.noContrato) + dpRow('Coordinador', p.coordinador) + dpRow('Supervisor de Campo', p.supervisor) +
+    '</div>' +
+    '<div class="dp-section"><div class="dp-section-title">Supervisión</div>' +
+      '<div class="dp-row"><span class="dl">Tipo</span><span class="dv"><span style="background:'+(p.tipoSupervision==='interna'?'var(--verde-l)':'var(--az6)')+';color:'+(p.tipoSupervision==='interna'?'var(--verde)':'var(--az2)')+';padding:2px 8px;border-radius:8px;font-size:10px">'+(p.tipoSupervision==='interna'?'Supervisión Interna DGCV':'Supervisión Externa')+'</span></span></div>' +
+      (p.tipoSupervision!=='interna' ? dpRow('Empresa Supervisora',p.supervisora)+dpRow('N° Contrato',p.noContratoSup) : '') +
+    '</div>' +
     '<div class="dp-section"><div class="dp-section-title">Fechas y Plazo</div>' +
       dpRow('Fecha Adjudicación', p.fechaAdjudicacion) + dpRow('Fecha de Contrato', p.fechaContrato) +
       dpRow('Plazo', p.plazo ? p.plazo+' días' : null) + dpRow('Fecha de Inicio', p.fechaInicio) + dpRow('Fecha de Finalización', p.fechaFinObra) +
     '</div>' +
-
-    // Garantías
     '<div class="dp-section"><div class="dp-section-title">Garantías</div>' +
       (p.nFianzaAnticipo ? '<div style="background:var(--az7);border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--az2);font-size:10px;margin-bottom:2px">ANTICIPO</div>'+dpRow('N°',p.nFianzaAnticipo)+dpRow('Vigencia',p.iniFA+' → '+p.finFA)+dpRow('Monto','L '+fmtL(p.montoFianzaAnticipo))+'</div>' : '') +
       (p.nFianzaCumplimiento ? '<div style="background:var(--verde-l);border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--verde);font-size:10px;margin-bottom:2px">CUMPLIMIENTO</div>'+dpRow('N°',p.nFianzaCumplimiento)+dpRow('Vigencia',p.iniFC+' → '+p.finFC)+dpRow('Monto','L '+fmtL(p.montoFianzaCumplimiento))+'</div>' : '') +
       (p.nFianzaCalidad ? '<div style="background:#FDF3E3;border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px"><div style="font-weight:600;color:var(--amarillo);font-size:10px;margin-bottom:2px">CALIDAD</div>'+dpRow('N°',p.nFianzaCalidad)+dpRow('Vigencia',p.iniFCal+' → '+p.finFCal)+dpRow('Monto','L '+fmtL(p.montoFianzaCalidad))+'</div>' : '') +
       (!p.nFianzaAnticipo&&!p.nFianzaCumplimiento&&!p.nFianzaCalidad ? '<div style="font-size:11px;color:var(--gris3)">Sin garantías registradas</div>' : '') +
     '</div>' +
-
-    // Financiero
     '<div class="dp-section"><div class="dp-section-title">Información Financiera</div>' +
       dpRow('Monto de Contrato', 'L '+fmtL(p.montoContratoInicial)) +
       (p.montoModificacion ? dpRow('Modificación / Adenda','<span style="color:var(--amarillo)">L '+fmtL(p.montoModificacion)+'</span>') : '') +
       dpRow('Total Devengado', 'L '+fmtL(p.totalDevengado)) +
       dpRow('Deuda Pendiente', '<span style="color:'+(parseFloat(p.deuda)<0?'var(--rojo)':'inherit')+'">L '+fmtL(p.deuda)+'</span>') +
     '</div>' +
-
-    // Avance
     '<div class="dp-section"><div class="dp-section-title">Avance del Proyecto</div>' +
       '<div class="avance-block">' +
         '<div class="avance-row"><div class="avance-label"><span>Avance Físico</span><span style="color:var(--az2);font-weight:500">'+af.toFixed(1)+'%</span></div><div class="avance-track"><div class="avance-fill" style="width:'+Math.min(af,100)+'%;background:var(--az3)"></div></div></div>' +
         '<div class="avance-row"><div class="avance-label"><span>Avance Financiero <span style="font-size:9px;color:var(--gris3)">(calculado)</span></span><span style="color:var(--verde);font-weight:500">'+afin.toFixed(1)+'%</span></div><div class="avance-track"><div class="avance-fill" style="width:'+Math.min(afin,100)+'%;background:var(--verde)"></div></div></div>' +
       '</div>' +
     '</div>' +
-
-    // Pagos e Historial
     '<div class="dp-section"><div class="dp-section-title">Pagos ('+(p.pagos||[]).length+')</div>' + pagosHtml + '</div>' +
     '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>';
 
@@ -900,79 +886,9 @@ function closeDetail(e) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  SELECTOR DE TIPO DE PROYECTO (Construcción / Supervisión)
-// ═══════════════════════════════════════════════════════════
-function openFormOrSelector(u, idx) {
-  // Si estamos editando, el tipo ya está definido — ir directo al form
-  if (idx !== null && idx !== undefined) {
-    var existing = (DB[u] || [])[idx];
-    var tipo = existing ? (existing.tipoProyecto || 'construccion') : 'construccion';
-    openForm(u, idx, tipo);
-    return;
-  }
-  // Nuevo proyecto → mostrar selector de tipo
-  var perms = getPerms(u, null);
-  if (!perms.canAdd) { showToast('No tiene permiso para agregar proyectos en esta unidad.', 'err'); return; }
-
-  editingId = { u: u, idx: null };
-  document.getElementById('modalTitle').textContent = 'Nuevo Proyecto — ' + UNIDADES[u].nombre;
-
-  document.getElementById('modalBody').innerHTML =
-    '<div style="padding:10px 0 6px;text-align:center">' +
-      '<div style="font-size:13px;color:var(--gris2);margin-bottom:20px;">Seleccione el tipo de proyecto a registrar:</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' +
-
-        // ── Construcción
-        '<div onclick="openForm(\''+u+'\',null,\'construccion\')" style="cursor:pointer;border:2px solid var(--az4);border-radius:10px;padding:24px 16px;text-align:center;background:var(--az7);transition:.15s" '+
-             'onmouseenter="this.style.background=\'var(--az6)\'" onmouseleave="this.style.background=\'var(--az7)\'">' +
-          '<svg width="40" height="40" viewBox="0 0 40 40" fill="none" style="margin:0 auto 12px;display:block">' +
-            '<rect x="4" y="18" width="24" height="14" rx="2" stroke="var(--az2)" stroke-width="1.8"/>' +
-            '<circle cx="8" cy="32" r="3.5" stroke="var(--az2)" stroke-width="1.6"/>' +
-            '<circle cx="20" cy="32" r="3.5" stroke="var(--az2)" stroke-width="1.6"/>' +
-            '<rect x="10" y="12" width="10" height="6" rx="1" stroke="var(--az2)" stroke-width="1.6"/>' +
-            '<line x1="3" y1="8" x2="37" y2="8" stroke="var(--az3)" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="3 2"/>' +
-            '<path d="M28 18 L28 10 L36 10 L36 18" stroke="var(--az2)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
-          '</svg>' +
-          '<div style="font-size:15px;font-weight:600;color:var(--az1);margin-bottom:6px">Registrar Construcción</div>' +
-          '<div style="font-size:11px;color:var(--gris3);line-height:1.5">Contratos de obra, mejoramiento,<br>rehabilitación y ampliación vial</div>' +
-        '</div>' +
-
-        // ── Supervisión
-        '<div onclick="openForm(\''+u+'\',null,\'supervision\')" style="cursor:pointer;border:2px solid #9B6DD6;border-radius:10px;padding:24px 16px;text-align:center;background:#F5F0FC;transition:.15s" '+
-             'onmouseenter="this.style.background=\'#EDE5F5\'" onmouseleave="this.style.background=\'#F5F0FC\'">' +
-          '<svg width="40" height="40" viewBox="0 0 40 40" fill="none" style="margin:0 auto 12px;display:block">' +
-            '<circle cx="20" cy="13" r="7" stroke="#5C2E8A" stroke-width="1.8"/>' +
-            '<path d="M8 34c0-6.6 5.4-12 12-12s12 5.4 12 12" stroke="#5C2E8A" stroke-width="1.8" stroke-linecap="round"/>' +
-            '<circle cx="32" cy="10" r="4" fill="#EDE5F5" stroke="#5C2E8A" stroke-width="1.6"/>' +
-            '<path d="M30 10l1.5 1.5L34 8" stroke="#5C2E8A" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
-          '</svg>' +
-          '<div style="font-size:15px;font-weight:600;color:#3D1A6E;margin-bottom:6px">Registrar Supervisión</div>' +
-          '<div style="font-size:11px;color:var(--gris3);line-height:1.5">Contratos de supervisión externa<br>de obras en ejecución</div>' +
-        '</div>' +
-
-      '</div>' +
-    '</div>';
-
-  // Ocultar el botón "Guardar Proyecto" mientras se muestra el selector
-  var footer = document.querySelector('.modal-footer');
-  if (footer) footer.style.display = 'none';
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
-// ── Helpers ──────────────────────────────────────────────────
-// Obtiene contratos de supervisión ya registrados en esta unidad
-function getContratosSupervisionDisponibles(u) {
-  return (DB[u] || []).filter(function(p) {
-    return p.tipoProyecto === 'supervision' && p.nProceso;
-  }).map(function(p) {
-    return { nProceso: p.nProceso, nombre: p.proyecto || p.nProceso };
-  });
-}
-
-// ═══════════════════════════════════════════════════════════
 //  FORMULARIO — ABRIR
 // ═══════════════════════════════════════════════════════════
-function openForm(u, idx, tipoProyecto) {
+function openForm(u, idx) {
   // Security guard: re-check permissions before opening form
   var proj = (idx !== null && idx !== undefined) ? (DB[u] || [])[idx] : null;
   var perms = getPerms(u, proj);
@@ -981,19 +897,9 @@ function openForm(u, idx, tipoProyecto) {
   if (!isNew && !perms.canEdit)  { showToast('No tiene permiso para editar este proyecto.', 'err'); return; }
   editingId = { u: u, idx: idx };
   endosoCount = 0; pagoCount = 0;
-  var p      = (idx !== null && idx !== undefined) ? (DB[u][idx] || {}) : {};
-  var isEdit = (idx !== null && idx !== undefined);
-
-  // Determine type: from existing record when editing, from param when new
-  tipoProyecto = tipoProyecto || p.tipoProyecto || 'construccion';
-  var esSupervision = (tipoProyecto === 'supervision');
-
-  // Restore footer (may have been hidden by the type selector)
-  var footer = document.querySelector('.modal-footer');
-  if (footer) footer.style.display = '';
-
-  var tipoLabel = esSupervision ? 'Supervisión' : 'Construcción';
-  document.getElementById('modalTitle').textContent = (isEdit ? 'Editar' : 'Nuevo') + ' Proyecto de ' + tipoLabel + ' — ' + UNIDADES[u].nombre;
+  var p      = idx !== null ? (DB[u][idx] || {}) : {};
+  var isEdit = idx !== null;
+  document.getElementById('modalTitle').textContent = (isEdit ? 'Editar' : 'Nuevo') + ' Proyecto — ' + UNIDADES[u].nombre;
 
   function fv(field) {
     var v = p[field];
@@ -1033,23 +939,7 @@ function openForm(u, idx, tipoProyecto) {
       '<div class="form-group"><label>Longitud GPS <span class="req">*</span></label><input type="text" id="f_longitudRef" value="'+fv('longitudRef')+'" placeholder="-87.206944" oninput="this.value=this.value.replace(/[^0-9.\-]/g,\'\')"/></div>' +
     '</div>' +
   '</div>' +
-  // ── SECCIÓN 3: varía según tipo ─────────────────────────────
-  (esSupervision ?
-  // SUPERVISIÓN: datos del contrato de supervisión
-  '<div class="form-section">' +
-    '<div class="form-section-title" style="color:#5C2E8A"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 12c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Empresa Supervisora</div>' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Empresa Supervisora <span class="req">*</span></label>'+empresaInput('f_supervisora','supervisora',fv('supervisora'))+'</div>' +
-      '<div class="form-group"><label>N° de Contrato de Supervisión</label><input type="text" id="f_noContrato" value="'+fv('noContrato')+'"/></div>' +
-      '<div class="form-group"><label>Nombre del Coordinador de Supervisión <span class="req">*</span></label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>' +
-    '</div>' +
-    '<div style="margin-top:12px;font-size:11px;font-weight:600;color:var(--gris2);margin-bottom:8px">Contratos de Construcción que Supervisa</div>' +
-    '<div style="font-size:10px;color:var(--gris3);margin-bottom:8px">Registre los números de contrato de obra que esta supervisión cubre. Estos estarán disponibles para seleccionar al registrar proyectos de construcción.</div>' +
-    '<div id="contratos-supervisa-container"></div>' +
-    '<button class="add-row-btn" onclick="addContratoSupervisa()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Contrato</button>' +
-  '</div>'
-  :
-  // CONSTRUCCIÓN: empresa constructora normal
+  // ── SECCIÓN 3: CONSTRUCTORA
   '<div class="form-section">' +
     '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="5" width="11" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5V3a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.2"/></svg>Empresa Constructora</div>' +
     '<div class="form-grid g2">' +
@@ -1058,52 +948,29 @@ function openForm(u, idx, tipoProyecto) {
       '<div class="form-group"><label>Nombre del Coordinador <span class="req">*</span></label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>' +
       '<div class="form-group"><label>Supervisor de Campo <span class="req">*</span></label><input type="text" id="f_supervisor" value="'+fv('supervisor')+'"/></div>' +
     '</div>' +
-  '</div>') +
-  // ── SECCIÓN 4: SUPERVISIÓN — varía según tipo ───────────────
-  (esSupervision ? '' :
+  '</div>' +
+  // ── SECCIÓN 4: SUPERVISIÓN
   '<div class="form-section">' +
     '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 12c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Supervisión del Proyecto</div>' +
     '<div style="display:flex;gap:10px;margin-bottom:12px">' +
       '<label id="lbl-sup-ext" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
         '<input type="radio" name="tipoSup" value="externa" '+(tipoSup==='externa'?'checked':'')+' onchange="toggleSup(\'externa\')" style="accent-color:var(--az2)"/>' +
-        '<div><div style="font-weight:500">Supervisión Externa</div><div style="font-size:10px;color:var(--gris3)">Empresa supervisora contratada</div></div>' +
+        '<div><div style="font-weight:500">Supervisión Externa</div><div style="font-size:10px;color:var(--gris3)">Empresa contratada</div></div>' +
       '</label>' +
       '<label id="lbl-sup-int" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
         '<input type="radio" name="tipoSup" value="interna" '+(tipoSup==='interna'?'checked':'')+' onchange="toggleSup(\'interna\')" style="accent-color:var(--az2)"/>' +
-        '<div><div style="font-weight:500">Supervisión Interna DGCV</div><div style="font-size:10px;color:var(--gris3)">Personal de la institución</div></div>' +
+        '<div><div style="font-weight:500">Supervisión Interna</div><div style="font-size:10px;color:var(--gris3)">Personal DGCV</div></div>' +
       '</label>' +
     '</div>' +
-    // INTERNA: solo nombre del supervisor de campo
-    '<div id="sup-int-fields" style="display:none">' +
-      '<div class="form-grid g1">' +
-        '<div class="form-group"><label>Nombre del Supervisor de Campo (DGCV)</label><input type="text" id="f_supervisorInterno" value="'+fv('supervisorInterno')+'" placeholder="Nombre del funcionario responsable"/></div>' +
-      '</div>' +
-    '</div>' +
-    // EXTERNA: empresa supervisora + seleccionar contrato de supervisión registrado
     '<div id="sup-ext-fields">' +
-      '<div class="form-grid g2">' +
+      '<div class="form-grid g3">' +
         '<div class="form-group"><label>Empresa Supervisora</label>'+empresaInput('f_supervisora','supervisora',fv('supervisora'))+'</div>' +
-        (function(){
-          var contratos = getContratosSupervisionDisponibles(u);
-          if (contratos.length === 0) {
-            return '<div class="form-group"><label>Contrato de Supervisión</label>' +
-              '<div style="background:var(--amarillo-l);border-radius:5px;padding:8px 10px;font-size:11px;color:var(--amarillo)">' +
-                'No hay contratos de supervisión registrados en esta unidad. Regístre primero un proyecto de tipo <strong>Supervisión</strong>.' +
-              '</div></div>';
-          }
-          var opts = '<option value="">— Seleccione contrato —</option>' +
-            contratos.map(function(c){
-              return '<option value="'+c.nProceso+'"'+(fv('noContratoSup')===c.nProceso?' selected':'')+'>'+c.nProceso+' — '+c.nombre+'</option>';
-            }).join('');
-          return '<div class="form-group"><label>Contrato de Supervisión Registrado</label>' +
-            '<select id="f_noContratoSup" onchange="onContratoSupChange(this.value,\''+u+'\')">'+opts+'</select>' +
-            '<div class="form-hint">Seleccione el contrato de supervisión que cubre esta obra</div>' +
-            '</div>';
-        })() +
+        '<div class="form-group"><label>N° Contrato Supervisora</label><input type="text" id="f_noContratoSup" value="'+fv('noContratoSup')+'"/></div>' +
+        '<div class="form-group"><label>Contratos que Supervisa</label><input type="text" id="f_contratosSupervisa" value="'+fv('contratosSupervisa')+'"/></div>' +
       '</div>' +
-      '<div id="sup-ext-detalle" style="margin-top:8px"></div>' +
     '</div>' +
-  '</div>') +
+    '<div id="sup-int-fields" style="display:none"><div style="background:var(--az7);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--az2)">Este proyecto cuenta con supervisión interna de la DGCV.</div></div>' +
+  '</div>' +
   // ── SECCIÓN 5: FECHAS
   '<div class="form-section">' +
     '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 1v2M9 1v2M1 6h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Fechas y Plazo de Ejecución</div>' +
@@ -1178,17 +1045,9 @@ function openForm(u, idx, tipoProyecto) {
 
   document.getElementById('modalOverlay').classList.add('open');
 
-  // Init supervision toggle (only for construccion)
-  if (!esSupervision) {
-    toggleSup(tipoSup);
-  }
-  setTimeout(syncEstadoAvance, 0);
-
-  // Init contratos supervisa (only for supervision)
-  if (esSupervision) {
-    (p.contratosSupervisa || []).forEach(function(c) { addContratoSupervisa(c); });
-    if (!(p.contratosSupervisa||[]).length) addContratoSupervisa();
-  }
+  // Init supervision toggle
+  toggleSup(tipoSup);
+  setTimeout(syncEstadoAvance, 0); // Sync estado/avance al abrir en modo edición
 
   // Init endosos and pagos
   (p.endosos || []).forEach(function(e) { addEndoso(e); });
@@ -1208,43 +1067,6 @@ function toggleSup(tipo) {
   if (intF) intF.style.display = tipo === 'interna' ? 'block' : 'none';
   if (lE)  { lE.style.borderColor = tipo==='externa' ? 'var(--az4)' : 'var(--border)'; lE.style.background = tipo==='externa' ? 'var(--az7)' : '#fff'; }
   if (lI)  { lI.style.borderColor = tipo==='interna' ? 'var(--az4)' : 'var(--border)'; lI.style.background = tipo==='interna' ? 'var(--az7)' : '#fff'; }
-}
-
-// ── Cuando se selecciona un contrato de supervisión en construcción ──
-function onContratoSupChange(nProceso, u) {
-  var detalle = document.getElementById('sup-ext-detalle');
-  if (!detalle) return;
-  if (!nProceso) { detalle.innerHTML = ''; return; }
-  var contrato = (DB[u] || []).find(function(p) {
-    return p.tipoProyecto === 'supervision' && p.nProceso === nProceso;
-  });
-  if (!contrato) { detalle.innerHTML = ''; return; }
-  detalle.innerHTML =
-    '<div style="background:var(--az7);border-radius:5px;padding:8px 12px;font-size:11px;color:var(--az2)">' +
-      '<div style="font-weight:600;margin-bottom:3px">'+contrato.proyecto+'</div>' +
-      '<div style="color:var(--gris2)">Empresa: <strong>'+(contrato.supervisora||'—')+'</strong></div>' +
-      (contrato.coordinador ? '<div style="color:var(--gris2)">Coordinador: '+contrato.coordinador+'</div>' : '') +
-    '</div>';
-}
-
-// ── Contratos que supervisa (para registro de supervisión) ──
-var contratoSupCount = 0;
-function addContratoSupervisa(data) {
-  data = data || {};
-  contratoSupCount++;
-  var n = contratoSupCount;
-  var con = document.getElementById('contratos-supervisa-container');
-  if (!con) return;
-  var div = document.createElement('div');
-  div.className = 'pago-card'; div.id = 'csup-' + n;
-  div.innerHTML =
-    '<div class="pago-num">Contrato N° ' + n + '</div>' +
-    '<button class="pago-remove" onclick="document.getElementById(\'csup-'+n+'\').remove()">✕</button>' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>N° Contrato de Obra</label><input type="text" class="csup-num" value="'+(data.nContrato||'')+'" placeholder="Ej. SITU-CONS-2025-001"/></div>' +
-      '<div class="form-group"><label>Descripción / Nombre del Proyecto</label><input type="text" class="csup-desc" value="'+(data.descripcion||'')+'" placeholder="Nombre del proyecto de construcción"/></div>' +
-    '</div>';
-  con.appendChild(div);
 }
 
 function clampPct(inp) {
@@ -1372,16 +1194,7 @@ function saveProject() {
   var idx = editingId.idx;
   function g(id) { var el = document.getElementById(id); return el ? el.value : ''; }
 
-  // Determine tipo from the modal title or stored editingId
-  var existingProj = (idx !== null && idx !== undefined) ? (DB[u][idx] || {}) : {};
-  // Detect tipo by presence of supervision-specific fields
-  var esSupervision = !!document.getElementById('contratos-supervisa-container');
-  var tipoProyecto  = esSupervision ? 'supervision' : 'construccion';
-  var tipoSup = (!esSupervision && document.querySelector('[name="tipoSup"]:checked'))
-    ? document.querySelector('[name="tipoSup"]:checked').value
-    : 'externa';
-
-  // ── Validación ─────────────────────────────────────────────
+  // Validación — 13 campos obligatorios
   var errs = [];
   if (!g('f_nProceso'))          errs.push('N° Proceso de Contratación');
   if (!g('f_estado'))            errs.push('Estado del Proyecto');
@@ -1393,31 +1206,39 @@ function saveProject() {
   if (!g('f_aldeaBarrio'))       errs.push('Aldea / Barrio / Caserío');
   if (!g('f_latitud'))           errs.push('Latitud GPS');
   if (!g('f_longitudRef'))       errs.push('Longitud GPS');
+  if (!g('f_constructora'))      errs.push('Empresa Constructora');
+  if (!g('f_coordinador'))       errs.push('Nombre del Coordinador');
+  if (!g('f_supervisor'))        errs.push('Supervisor de Campo');
   if (!g('f_fechaAdjudicacion')) errs.push('Fecha de Adjudicación');
-  if (!esSupervision) {
-    if (!g('f_constructora'))  errs.push('Empresa Constructora');
-    if (!g('f_coordinador'))   errs.push('Nombre del Coordinador');
-    if (!g('f_supervisor'))    errs.push('Supervisor de Campo');
-  } else {
-    if (!g('f_supervisora'))   errs.push('Empresa Supervisora');
-    if (!g('f_coordinador'))   errs.push('Coordinador de Supervisión');
-  }
   var avF = parseFloat(g('f_avanceFisico'));
   if (g('f_avanceFisico') === '' || isNaN(avF) || avF < 0 || avF > 100) errs.push('Avance Físico (0–100%)');
   if (errs.length) {
     showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err');
+    // Highlight missing fields visually
+    ['f_nProceso','f_estado','f_proyecto','f_descripcion','f_longitud',
+     'f_departamento','f_municipio','f_aldeaBarrio','f_latitud','f_longitudRef',
+     'f_constructora','f_coordinador','f_supervisor','f_fechaAdjudicacion','f_avanceFisico'
+    ].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var empty = (id === 'f_avanceFisico')
+        ? (el.value === '' || isNaN(parseFloat(el.value)) || parseFloat(el.value) < 0 || parseFloat(el.value) > 100)
+        : !el.value;
+      el.style.borderColor = empty ? 'var(--rojo)' : '';
+      el.style.background  = empty ? 'var(--rojo-l)' : '';
+      if (empty) {
+        el.addEventListener('input', function fix() {
+          el.style.borderColor = ''; el.style.background = '';
+          el.removeEventListener('input', fix);
+        });
+      }
+    });
     return;
   }
 
-  // ── Recolectar contratos supervisados (solo supervisión) ───
-  var contratosSupervisa = [];
-  document.querySelectorAll('#contratos-supervisa-container .pago-card').forEach(function(card) {
-    var num  = (card.querySelector('.csup-num')  ||{}).value||'';
-    var desc = (card.querySelector('.csup-desc') ||{}).value||'';
-    if (num || desc) contratosSupervisa.push({ nContrato: num, descripcion: desc });
-  });
+  var tipoSup = (document.querySelector('[name="tipoSup"]:checked') || {}).value || 'externa';
 
-  // ── Recolectar endosos ──────────────────────────────────────
+  // Recolectar endosos
   var endosos = [];
   document.querySelectorAll('#endosos-container .endoso-card').forEach(function(card) {
     var e = {
@@ -1431,7 +1252,7 @@ function saveProject() {
     if (e.numEndoso || e.fianzaVinculada) endosos.push(e);
   });
 
-  // ── Recolectar pagos ────────────────────────────────────────
+  // Recolectar pagos
   var pagos = [];
   document.querySelectorAll('#pagos-container .pago-card').forEach(function(card) {
     var pg = {
@@ -1444,15 +1265,15 @@ function saveProject() {
     if (pg.monto) pagos.push(pg);
   });
 
-  // ── Calcular totales ────────────────────────────────────────
+  // Calcular totales
   var mI  = parseFloat(g('f_montoContratoInicial')) || 0;
   var mM  = parseFloat(g('f_montoModificacion'))    || 0;
   var vig = mM > 0 ? mM : mI;
   var dev = pagos.reduce(function(a,pg) { return a + (parseFloat(pg.monto)||0); }, 0);
   var avFin = vig > 0 ? parseFloat((dev/vig*100).toFixed(2)) : 0;
 
-  // ── Historial ───────────────────────────────────────────────
-  var prevProj = (idx !== null && idx !== undefined) ? DB[u][idx] : null;
+  // Historial
+  var prevProj = idx !== null ? DB[u][idx] : null;
   var cambios  = [];
   if (prevProj) {
     var campos = { proyecto:'Nombre',estado:'Estado',constructora:'Constructora',departamento:'Dpto',avanceFisico:'Av. Físico',montoContratoInicial:'Monto Contrato' };
@@ -1462,10 +1283,12 @@ function saveProject() {
       if (prev !== curr) cambios.push(campos[k]+': "'+prev+'" → "'+curr+'"');
     });
     if ((prevProj.pagos||[]).length !== pagos.length) cambios.push('Pagos: '+(prevProj.pagos||[]).length+' → '+pagos.length);
+    if ((prevProj.endosos||[]).length !== endosos.length) cambios.push('Endosos: '+(prevProj.endosos||[]).length+' → '+endosos.length);
     if (!cambios.length) cambios.push('Sin cambios detectados en campos principales');
   } else {
-    cambios.push('Proyecto de '+tipoProyecto+' creado · '+pagos.length+' pago(s)');
+    cambios.push('Proyecto creado · '+pagos.length+' pago(s) · '+endosos.length+' endoso(s)');
   }
+
   var histEntry = {
     fecha:   new Date().toISOString(),
     usuario: currentUser.nombre,
@@ -1474,9 +1297,7 @@ function saveProject() {
     cambios: cambios
   };
 
-  // ── Construir objeto proyecto ───────────────────────────────
   var proj = {
-    tipoProyecto:   tipoProyecto,
     nProceso:       g('f_nProceso'),
     proyecto:       g('f_proyecto'),
     descripcion:    g('f_descripcion'),
@@ -1490,26 +1311,19 @@ function saveProject() {
     aldeaBarrio:    g('f_aldeaBarrio'),
     latitud:        g('f_latitud'),
     longitudRef:    g('f_longitudRef'),
-    // Construcción
-    constructora:   !esSupervision ? g('f_constructora') : '',
+    constructora:   g('f_constructora'),
     noContrato:     g('f_noContrato'),
     coordinador:    g('f_coordinador'),
-    supervisor:     !esSupervision ? g('f_supervisor') : '',
-    // Supervisión (en proj. de construcción)
-    tipoSupervision: !esSupervision ? tipoSup : 'externa',
-    supervisora:     esSupervision  ? g('f_supervisora') :
-                     (tipoSup==='externa' ? g('f_supervisora') : ''),
-    noContratoSup:   !esSupervision && tipoSup==='externa' ? g('f_noContratoSup') : '',
-    supervisorInterno: !esSupervision && tipoSup==='interna' ? g('f_supervisorInterno') : '',
-    // Contratos supervisados (solo tipo supervisión)
-    contratosSupervisa: esSupervision ? contratosSupervisa : [],
-    // Fechas
+    supervisor:     g('f_supervisor'),
+    tipoSupervision: tipoSup,
+    supervisora:    tipoSup==='externa' ? g('f_supervisora')       : 'Supervisión Interna DGCV',
+    noContratoSup:  tipoSup==='externa' ? g('f_noContratoSup')     : '',
+    contratosSupervisa: tipoSup==='externa' ? g('f_contratosSupervisa') : '',
     fechaAdjudicacion: g('f_fechaAdjudicacion'),
     fechaContrato:  g('f_fechaContrato'),
     plazo:          g('f_plazo'),
     fechaInicio:    g('f_fechaInicio'),
     fechaFinObra:   g('f_fechaFinObra'),
-    // Garantías
     nFianzaAnticipo:     g('f_nFianzaAnticipo'),    iniFA:  g('f_iniFA'),   finFA:  g('f_finFA'),   montoFianzaAnticipo:     g('f_montoFianzaAnticipo'),
     nFianzaCumplimiento: g('f_nFianzaCumplimiento'),iniFC:  g('f_iniFC'),   finFC:  g('f_finFC'),   montoFianzaCumplimiento: g('f_montoFianzaCumplimiento'),
     nFianzaCalidad:      g('f_nFianzaCalidad'),     iniFCal:g('f_iniFCal'), finFCal:g('f_finFCal'), montoFianzaCalidad:      g('f_montoFianzaCalidad'),
@@ -1528,18 +1342,19 @@ function saveProject() {
   };
 
   // Update local cache first
-  if (idx === null || idx === undefined) DB[u].push(proj);
+  if (idx === null) DB[u].push(proj);
   else DB[u][idx] = proj;
 
   closeModal();
   updateBadges();
-  endosoCount = 0; pagoCount = 0; contratoSupCount = 0;
+  endosoCount = 0; pagoCount = 0;
 
-  var isNew = (idx === null || idx === undefined);
+  // Navigate to unidad list immediately
+  var isNew = idx === null;
   showView(u, document.getElementById('nav-' + u));
   showBanner(isNew ? '✓ Proyecto "' + proj.proyecto.slice(0,40) + '" registrado exitosamente' : '✓ Proyecto actualizado correctamente');
 
-  // Save to Supabase async
+  // Save to Supabase (async — no bloquea la UI)
   persistirProyecto(u, proj)
     .then(function(newId) {
       if (isNew) {
@@ -1554,8 +1369,10 @@ function saveProject() {
     })
     .catch(function(e) {
       saveLocalDB();
+      // Mostrar error completo en pantalla para diagnóstico
       var msg = 'Error al guardar en BD: ' + e.message;
       showToast(msg, 'err');
+      // También mostrar en alerta para que sea imposible de ignorar
       setTimeout(function() { alert('⚠️ ' + msg + '\n\nEl proyecto quedó guardado localmente pero NO en Supabase.\nRevise la conexión.'); }, 500);
     });
 }
@@ -1588,10 +1405,7 @@ function deleteProject(u, i) {
 function closeModal(e) {
   if (e && e.target !== document.getElementById('modalOverlay')) return;
   document.getElementById('modalOverlay').classList.remove('open');
-  // Restore footer in case it was hidden by type selector
-  var footer = document.querySelector('.modal-footer');
-  if (footer) footer.style.display = '';
-  editingId = null; endosoCount = 0; pagoCount = 0; contratoSupCount = 0;
+  editingId = null; endosoCount = 0; pagoCount = 0;
 }
 function closeDetail(e) {
   if (e && e.target !== document.getElementById('detailOverlay')) return;
@@ -1623,8 +1437,16 @@ function renderUsuariosPanel() {
     return;
   }
   var mc = document.getElementById('mainContent');
-  mc.innerHTML = '<div class="page-header"><h2>Gestión de Usuarios</h2><p>Administre los accesos al sistema por unidad.</p>' +
-    '<div class="page-actions"><button class="btn btn-primary" onclick="abrirModalUsuario()">+ Nuevo Usuario</button></div></div>' +
+  mc.innerHTML =
+    '<div class="page-header">' +
+      '<h2>Gestión de Usuarios</h2>' +
+      '<p>Administre los accesos al sistema. Las contraseñas se gestionan con Supabase Auth (bcrypt).</p>' +
+      '<div class="page-actions"><button class="btn btn-primary" onclick="abrirModalUsuario()">+ Nuevo Usuario</button></div>' +
+    '</div>' +
+    '<div style="background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--az2);display:flex;align-items:center;gap:8px;">' +
+      '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.2"/><path d="M7 6v4M7 4.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>' +
+      '<span>Las contraseñas se almacenan con <strong>bcrypt</strong> en Supabase Auth — nunca son visibles ni en el código ni en la base de datos.</span>' +
+    '</div>' +
     '<div class="table-wrap"><div class="table-toolbar"><h3>Usuarios registrados</h3></div>' +
     '<div id="tablaUsuarios"><div class="empty-state"><p>Cargando...</p></div></div></div>';
   cargarTablaUsuarios();
@@ -1634,26 +1456,26 @@ async function cargarTablaUsuarios() {
   try {
     var rows = await supaGet('usuarios', 'select=*&order=unidad.asc,nombre.asc');
     var tbody = '';
-    (rows || []).forEach(function(u, i) {
+    (rows || []).forEach(function(u) {
       var estadoPill = u.activo
         ? '<span class="pill ejec">Activo</span>'
         : '<span class="pill susp">Inactivo</span>';
       tbody += '<tr>' +
-        '<td><strong>' + u.username + '</strong></td>' +
+        '<td><strong style="font-family:var(--mono);font-size:11px">' + (u.email || '—') + '</strong></td>' +
         '<td>' + u.nombre + '</td>' +
         '<td>' + (UNIDAD_NOMBRES[u.unidad] || u.unidad) + '</td>' +
         '<td>' + (u.rol === 'admin' ? 'Administrador' : 'Coordinador') + '</td>' +
         '<td>' + estadoPill + '</td>' +
         '<td><div class="tbl-actions">' +
-          '<button class="tbl-btn edit" onclick="abrirModalUsuario(\'' + u.id + '\')">Editar</button>' +
+          '<button class="tbl-btn edit" onclick="abrirModalUsuario(\'' + u.id + '\')">Editar perfil</button>' +
           '<button class="tbl-btn" onclick="cambiarEstadoUsuario(\'' + u.id + '\',' + !u.activo + ')">' + (u.activo ? 'Desactivar' : 'Activar') + '</button>' +
-          '<button class="tbl-btn" style="color:var(--rojo)" onclick="cambiarPasswordUsuario(\'' + u.id + '\',\'' + u.username + '\')">Cambiar contraseña</button>' +
+          '<button class="tbl-btn" style="color:var(--az2)" onclick="enviarResetPassword(\'' + (u.email||'') + '\')">Reset contraseña</button>' +
         '</div></td>' +
       '</tr>';
     });
     document.getElementById('tablaUsuarios').innerHTML =
       '<table class="tbl"><thead><tr>' +
-        '<th>Usuario</th><th>Nombre</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Acciones</th>' +
+        '<th>Correo</th><th>Nombre</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Acciones</th>' +
       '</tr></thead><tbody>' + tbody + '</tbody></table>';
   } catch(e) {
     document.getElementById('tablaUsuarios').innerHTML = '<div class="empty-state"><p>Error al cargar usuarios: ' + e.message + '</p></div>';
@@ -1662,91 +1484,118 @@ async function cargarTablaUsuarios() {
 
 function abrirModalUsuario(id) {
   var esEdicion = !!id;
-  var body = '<div class="form-section">' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Nombre completo <span class="req">*</span></label>' +
-        '<input type="text" id="u_nombre" placeholder="Ej: Juan Pérez"/></div>' +
-      '<div class="form-group"><label>Nombre de usuario <span class="req">*</span></label>' +
-        '<input type="text" id="u_username" placeholder="Ej: jperez" ' + (esEdicion ? 'readonly style="background:var(--gris6)"' : '') + '/></div>' +
-    '</div>' +
-    '<div class="form-grid g2" style="margin-top:12px">' +
-      '<div class="form-group"><label>Unidad <span class="req">*</span></label>' +
-        '<select id="u_unidad">' +
-          '<option value="">— Seleccione —</option>' +
+  var body =
+    '<div class="form-section">' +
+      '<div class="form-grid g2">' +
+        '<div class="form-group"><label>Nombre completo <span class="req">*</span></label>' +
+          '<input type="text" id="u_nombre" placeholder="Ej: Juan Pérez"/></div>' +
+        '<div class="form-group"><label>Correo electrónico <span class="req">*</span></label>' +
+          '<input type="email" id="u_email" placeholder="coordinador@sit.gob.hn" ' + (esEdicion ? 'readonly style="background:var(--gris6)"' : '') + '/></div>' +
+      '</div>' +
+      '<div class="form-grid g2" style="margin-top:12px">' +
+        '<div class="form-group"><label>Unidad <span class="req">*</span></label>' +
+          '<select id="u_unidad"><option value="">— Seleccione —</option>' +
           Object.entries(UNIDAD_NOMBRES).map(function(e){ return '<option value="'+e[0]+'">'+e[1]+'</option>'; }).join('') +
-        '</select></div>' +
-      '<div class="form-group"><label>Rol <span class="req">*</span></label>' +
-        '<select id="u_rol"><option value="coordinador">Coordinador</option><option value="admin">Administrador</option></select></div>' +
-    '</div>' +
-    (!esEdicion ? '<div class="form-grid g2" style="margin-top:12px">' +
-      '<div class="form-group"><label>Contraseña <span class="req">*</span></label>' +
-        '<input type="password" id="u_pass" placeholder="Mínimo 6 caracteres"/></div>' +
-      '<div class="form-group"><label>Confirmar contraseña <span class="req">*</span></label>' +
-        '<input type="password" id="u_pass2" placeholder="Repita la contraseña"/></div>' +
-    '</div>' : '') +
-  '</div>';
+          '</select></div>' +
+        '<div class="form-group"><label>Rol <span class="req">*</span></label>' +
+          '<select id="u_rol"><option value="coordinador">Coordinador</option><option value="admin">Administrador</option></select></div>' +
+      '</div>' +
+      (!esEdicion ?
+        '<div class="form-grid g2" style="margin-top:12px">' +
+          '<div class="form-group"><label>Contraseña inicial <span class="req">*</span></label>' +
+            '<input type="password" id="u_pass" placeholder="Mínimo 8 caracteres"/>' +
+            '<div class="form-hint">El usuario podrá cambiarla después</div></div>' +
+          '<div class="form-group"><label>Confirmar contraseña <span class="req">*</span></label>' +
+            '<input type="password" id="u_pass2"/></div>' +
+        '</div>'
+      : '') +
+    '</div>';
 
-  // Reutilizar modal principal
-  document.getElementById('modalTitle').textContent = esEdicion ? 'Editar Usuario' : 'Nuevo Usuario';
+  document.getElementById('modalTitle').textContent = esEdicion ? 'Editar Perfil de Usuario' : 'Nuevo Usuario';
   document.getElementById('modalBody').innerHTML = body;
   document.getElementById('modalOverlay').classList.add('open');
 
-  // Sobrescribir temporalmente el botón guardar
   var btnGuardar = document.querySelector('.modal-footer .btn-primary');
   btnGuardar.onclick = function() { guardarUsuario(id); };
 
-  // Si es edición, cargar datos actuales
   if (esEdicion) {
     supaGet('usuarios', 'select=*&id=eq.' + id).then(function(rows) {
       if (!rows || !rows[0]) return;
       var u = rows[0];
-      document.getElementById('u_nombre').value   = u.nombre;
-      document.getElementById('u_username').value = u.username;
-      document.getElementById('u_unidad').value   = u.unidad;
-      document.getElementById('u_rol').value      = u.rol;
+      document.getElementById('u_nombre').value = u.nombre;
+      document.getElementById('u_email').value  = u.email || '';
+      document.getElementById('u_unidad').value = u.unidad;
+      document.getElementById('u_rol').value    = u.rol;
     });
   }
 }
 
 async function guardarUsuario(id) {
   var nombre   = (document.getElementById('u_nombre').value || '').trim();
-  var username = (document.getElementById('u_username').value || '').trim().toLowerCase();
+  var email    = (document.getElementById('u_email').value  || '').trim().toLowerCase();
   var unidad   = document.getElementById('u_unidad').value;
   var rol      = document.getElementById('u_rol').value;
   var esEdicion = !!id;
 
-  if (!nombre || !username || !unidad) {
+  if (!nombre || !email || !unidad) {
     showToast('Complete los campos obligatorios.', 'err');
     return;
   }
-
-  var rowData = { nombre: nombre, username: username, unidad: unidad, rol: rol };
-
-  if (!esEdicion) {
-    var pass  = document.getElementById('u_pass').value;
-    var pass2 = document.getElementById('u_pass2').value;
-    if (!pass || pass.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', 'err'); return; }
-    if (pass !== pass2)           { showToast('Las contraseñas no coinciden.', 'err'); return; }
-    rowData.password = await sha256hex(pass);
-    rowData.activo   = true;
+  if (!email.includes('@')) {
+    showToast('Ingrese un correo electrónico válido.', 'err');
+    return;
   }
 
-  try {
-    if (esEdicion) {
-      await supaPatch('usuarios', id, rowData);
-      showToast('Usuario actualizado correctamente.', 'ok');
-    } else {
+  if (!esEdicion) {
+    // ── Crear nuevo usuario ──────────────────────────────────
+    var pass  = (document.getElementById('u_pass')  || {}).value || '';
+    var pass2 = (document.getElementById('u_pass2') || {}).value || '';
+    if (pass.length < 8) { showToast('La contraseña debe tener al menos 8 caracteres.', 'err'); return; }
+    if (pass !== pass2)  { showToast('Las contraseñas no coinciden.', 'err'); return; }
+
+    try {
+      // 1. Crear cuenta en Supabase Auth (bcrypt automático)
+      var signupResp = await fetch(SUPA_AUTH + '/signup', {
+        method: 'POST',
+        headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: pass })
+      });
+      var signupData = await signupResp.json();
+      if (!signupResp.ok) {
+        showToast('Error al crear cuenta Auth: ' + (signupData.msg || signupData.error_description || 'Error desconocido'), 'err');
+        return;
+      }
+
+      // 2. Crear perfil en tabla usuarios
       var newId = genUUID();
-      rowData.id = newId;
-      await supaPost('usuarios', rowData);
-      showToast('Usuario creado. Puede iniciar sesión de inmediato.', 'ok');
+      await supaPost('usuarios', {
+        id:     newId,
+        email:  email,
+        nombre: nombre,
+        unidad: unidad,
+        rol:    rol,
+        activo: true
+      });
+
+      showToast('Usuario creado. Puede iniciar sesión con ' + email, 'ok');
+      closeModal();
+      document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
+      renderUsuariosPanel();
+    } catch(e) {
+      showToast('Error: ' + e.message, 'err');
     }
-    closeModal();
-    // Restaurar onclick del botón guardar al original
-    document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
-    renderUsuariosPanel();
-  } catch(e) {
-    showToast('Error al guardar: ' + e.message, 'err');
+
+  } else {
+    // ── Editar perfil existente (solo datos, no contraseña) ──
+    try {
+      await supaPatch('usuarios', id, { nombre: nombre, unidad: unidad, rol: rol });
+      showToast('Perfil actualizado correctamente.', 'ok');
+      closeModal();
+      document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
+      renderUsuariosPanel();
+    } catch(e) {
+      showToast('Error al actualizar: ' + e.message, 'err');
+    }
   }
 }
 
@@ -1762,16 +1611,23 @@ async function cambiarEstadoUsuario(id, nuevoEstado) {
   }
 }
 
-async function cambiarPasswordUsuario(id, username) {
-  var newPass = prompt('Nueva contraseña para "' + username + '" (mínimo 6 caracteres):');
-  if (!newPass) return;
-  if (newPass.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', 'err'); return; }
+async function enviarResetPassword(email) {
+  if (!email) { showToast('Este usuario no tiene correo registrado.', 'err'); return; }
+  if (!confirm('¿Enviar correo de restablecimiento de contraseña a ' + email + '?')) return;
   try {
-    var hash = await sha256hex(newPass);
-    await supaPatch('usuarios', id, { password: hash });
-    showToast('Contraseña actualizada para ' + username + '.', 'ok');
+    var resp = await fetch(SUPA_AUTH + '/recover', {
+      method: 'POST',
+      headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    });
+    if (resp.ok) {
+      showToast('Correo de restablecimiento enviado a ' + email, 'ok');
+    } else {
+      var d = await resp.json();
+      showToast('Error: ' + (d.msg || d.error_description || 'No se pudo enviar'), 'err');
+    }
   } catch(e) {
-    showToast('Error: ' + e.message, 'err');
+    showToast('Error de conexión: ' + e.message, 'err');
   }
 }
 
