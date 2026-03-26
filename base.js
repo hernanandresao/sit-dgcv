@@ -1061,7 +1061,7 @@ function renderUnidad(u) {
       '<td><div style="font-size:11px;font-weight:500;color:var(--az2)">'+cPor+'</div>'+(uMod&&uMod.usuario!==cPor?'<div style="font-size:9px;color:var(--gris3)">Mod: '+uMod.usuario+'</div>':'')+'</td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill az-fill" style="width:'+Math.min(paf,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(paf.toFixed(1))+'%</div></td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill gr-fill" style="width:'+Math.min(pafin,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(pafin.toFixed(1))+'%</div></td>' +
-      '<td style="font-size:11px;font-family:var(--mono);color:var(--gris2)">'+((p.tipoProyecto==\'supervision\'?p.noContratoSup:p.noContrato)||'—')+'</td>' +
+      '<td style="font-size:11px;font-family:var(--mono);color:var(--gris2)">'+((p.tipoProyecto==='supervision'?p.noContratoSup:p.noContrato)||'—')+'</td>' +
       '<td><span class="pill '+sc+'">'+(p.estado||'—')+'</span></td>' +
       '<td><div class="tbl-actions">' +
         '<button class="tbl-btn" onclick="openDetail(\''+u+'\','+i+')">Ver</button>' +
