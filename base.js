@@ -346,6 +346,256 @@ function onSelectContratoSupervision(sel) {
     '</div>';
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  FORMULARIO CONSTRUCCIÓN
+// ═══════════════════════════════════════════════════════════
+function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
+  var tipoSup = p.tipoSupervision || 'externa';
+  var haySupContratos = contratosSupervision.length > 0;
+  var supOpts = '<option value="">— Seleccione contrato de supervisión —</option>';
+  contratosSupervision.forEach(function(s) {
+    var unidLbl = UNIDADES[s._unidad] ? UNIDADES[s._unidad].nombre.split(' ').slice(0,2).join(' ') : s._unidad;
+    var lbl = (s.supervisora || '?') + ' — ' + (s.noContratoSup || 'S/N') + ' (' + unidLbl + ')';
+    supOpts += '<option value="'+(s._sid||'')+'"'+(p.contratoSupervisionId===s._sid?' selected':'')+'>'+lbl+'</option>';
+  });
+
+  return (
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6.5h5M4 4.5h5M4 8.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Datos Generales</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SITU-2025-001"/></div>' +
+      '<div class="form-group"><label>Estado del Proyecto <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
+      '<div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Descripción completa del proyecto"/></div>' +
+      '<div class="form-group span2"><label>Descripción / Alcance <span class="req">*</span></label><textarea id="f_descripcion" rows="2">'+fv('descripcion')+'</textarea></div>' +
+    '</div>' +
+    '<div class="form-grid g4" style="margin-top:10px">' +
+      '<div class="form-group"><label>Longitud (km) <span class="req">*</span></label><input type="number" id="f_longitud" value="'+fv('longitud')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Beneficiarios</label><input type="number" id="f_beneficiarios" value="'+fv('beneficiarios')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Empleados Directos</label><input type="number" id="f_empleadosDirectos" value="'+fv('empleadosDirectos')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Empleados Indirectos</label><input type="number" id="f_empleadosIndirectos" value="'+fv('empleadosIndirectos')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1C4.567 1 3 2.567 3 4.5c0 2.5 3.5 7.5 3.5 7.5S10 7 10 4.5C10 2.567 8.433 1 6.5 1z" stroke="currentColor" stroke-width="1.2"/><circle cx="6.5" cy="4.5" r="1.2" stroke="currentColor" stroke-width="1.2"/></svg>Ubicación Geográfica</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Departamento <span class="req">*</span></label><select id="f_departamento" onchange="actualizarMunicipios()"><option value="">— Seleccione —</option>'+deptoOpts+'</select></div>' +
+      '<div class="form-group"><label>Municipio <span class="req">*</span></label><select id="f_municipio"><option value="">— Seleccione departamento —</option></select></div>' +
+      '<div class="form-group"><label>Aldea / Barrio / Caserío <span class="req">*</span></label><input type="text" id="f_aldeaBarrio" value="'+fv('aldeaBarrio')+'"/></div>' +
+      '<div class="form-group"><label>Latitud GPS <span class="req">*</span></label><input type="text" id="f_latitud" value="'+fv('latitud')+'" placeholder="14.081389" oninput="this.value=this.value.replace(/[^0-9.\\-]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Longitud GPS <span class="req">*</span></label><input type="text" id="f_longitudRef" value="'+fv('longitudRef')+'" placeholder="-87.206944" oninput="this.value=this.value.replace(/[^0-9.\\-]/g,\'\')"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="5" width="11" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5V3a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.2"/></svg>Empresa Constructora</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Empresa Constructora <span class="req">*</span></label>'+empresaInput('f_constructora','constructora',fv('constructora'))+'</div>' +
+      '<div class="form-group"><label>N° de Contrato</label><input type="text" id="f_noContrato" value="'+fv('noContrato')+'"/></div>' +
+      '<div class="form-group"><label>Nombre del Coordinador <span class="req">*</span></label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 12c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Supervisión del Proyecto</div>' +
+    '<div style="display:flex;gap:10px;margin-bottom:12px">' +
+      '<label id="lbl-sup-ext" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
+        '<input type="radio" name="tipoSup" value="externa" '+(tipoSup==='externa'?'checked':'')+' onchange="toggleSup(\'externa\')" style="accent-color:var(--az2)"/>' +
+        '<div><div style="font-weight:500">Supervisión Externa</div><div style="font-size:10px;color:var(--gris3)">Empresa contratada</div></div>' +
+      '</label>' +
+      '<label id="lbl-sup-int" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
+        '<input type="radio" name="tipoSup" value="interna" '+(tipoSup==='interna'?'checked':'')+' onchange="toggleSup(\'interna\')" style="accent-color:var(--az2)"/>' +
+        '<div><div style="font-weight:500">Supervisión Interna</div><div style="font-size:10px;color:var(--gris3)">Personal DGCV</div></div>' +
+      '</label>' +
+    '</div>' +
+    '<div id="sup-ext-fields">' +
+      (haySupContratos
+        ? '<div class="form-group"><label>Contrato de Supervisión <span class="req">*</span></label>' +
+            '<select id="f_contratoSupervisionId" onchange="onSelectContratoSupervision(this)" style="width:100%">'+supOpts+'</select></div>' +
+            '<div id="sup-ext-info" style="margin-top:8px;display:none"></div>'
+        : '<div style="background:var(--amarillo-l);border:1px solid #d4a500;border-radius:6px;padding:10px 14px;font-size:11px;color:var(--amarillo);">' +
+            '<strong>Sin contratos de supervisión registrados.</strong> Para asignar supervisión externa, primero registre un contrato de supervisión.' +
+          '</div>' +
+          '<input type="hidden" id="f_contratoSupervisionId" value=""/>'
+      ) +
+    '</div>' +
+    '<div id="sup-int-fields" style="display:none">' +
+      '<div class="form-group"><label>Nombre del Supervisor de Campo <span class="req">*</span></label>' +
+        '<input type="text" id="f_supervisorCampo" value="'+fv('supervisorCampo')+'" placeholder="Nombre completo del supervisor de campo DGCV"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 1v2M9 1v2M1 6h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Fechas y Plazo de Ejecución</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Fecha de Adjudicación <span class="req">*</span></label><input type="date" id="f_fechaAdjudicacion" value="'+fv('fechaAdjudicacion')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Firma del Contrato</label><input type="date" id="f_fechaContrato" value="'+fv('fechaContrato')+'"/></div>' +
+      '<div class="form-group"><label>Plazo (días calendario)</label><input type="number" id="f_plazo" value="'+fv('plazo')+'" min="1" placeholder="365" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Fecha de Inicio de Obras</label><input type="date" id="f_fechaInicio" value="'+fv('fechaInicio')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Finalización Programada</label><input type="date" id="f_fechaFinObra" value="'+fv('fechaFinObra')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1L9 4H12L9.5 6.5L10.5 9.5L6.5 7.5L2.5 9.5L3.5 6.5L1 4H4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>Garantías / Fianzas</div>' +
+    '<div style="background:var(--az7);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--az2);margin-bottom:6px">GARANTÍA DE ANTICIPO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaAnticipo" value="'+fv('nFianzaAnticipo')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFA" value="'+fv('iniFA')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFA" value="'+fv('finFA')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaAnticipo" value="'+fv('montoFianzaAnticipo')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:var(--verde-l);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--verde);margin-bottom:6px">GARANTÍA DE CUMPLIMIENTO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCumplimiento" value="'+fv('nFianzaCumplimiento')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFC" value="'+fv('iniFC')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFC" value="'+fv('finFC')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCumplimiento" value="'+fv('montoFianzaCumplimiento')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:#FDF3E3;border-radius:6px;padding:10px 12px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--amarillo);margin-bottom:6px">GARANTÍA DE CALIDAD</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCalidad" value="'+fv('nFianzaCalidad')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFCal" value="'+fv('iniFCal')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFCal" value="'+fv('finFCal')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCalidad" value="'+fv('montoFianzaCalidad')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M2 10L5 7M5 7L8 10M5 7V3M10 3h1a1 1 0 010 2h-1M10 5v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Endosos de Garantías</div>' +
+    '<div id="endosos-container"></div>' +
+    '<button class="add-row-btn" onclick="addEndoso()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Endoso</button>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera y Avances</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Monto Modificación / Adenda (L)</label><input type="number" id="f_montoModificacion" value="'+fv('montoModificacion')+'" step="0.01" min="0" placeholder="Solo si aplica" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+    '</div>' +
+    '<div class="form-grid g1" style="margin-top:10px">' +
+      '<div class="form-group"><label>Avance Físico de la Obra (%) <span class="req">*</span></label>' +
+        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">0%</span></div>' +
+        '<div class="form-hint">El avance financiero se calcula automáticamente desde los pagos</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
+    '<div id="pagos-container"></div>' +
+    '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
+    '<div class="totalizador" id="totalizador">' +
+      '<div class="tot-item"><strong id="tot-contrato">L 0.00</strong>Monto vigente</div>' +
+      '<div class="tot-item"><strong id="tot-devengado">L 0.00</strong>Total devengado</div>' +
+      '<div class="tot-item"><strong id="tot-deuda">L 0.00</strong>Deuda pendiente</div>' +
+      '<div class="tot-item"><strong id="tot-pct" style="color:var(--verde)">0.00%</strong>Avance financiero</div>' +
+    '</div>' +
+  '</div>'
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+//  FORMULARIO SUPERVISIÓN
+// ═══════════════════════════════════════════════════════════
+function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
+  return (
+  '<div class="form-section">' +
+    '<div class="form-section-title" style="color:var(--verde)"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6.5h5M4 4.5h5M4 8.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Datos Generales del Contrato de Supervisión</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SUP-SITU-2025-001"/></div>' +
+      '<div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
+      '<div class="form-group span2"><label>Nombre / Descripción del Contrato <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Ej. Supervisión de obras de pavimentación CA-5 Norte"/></div>' +
+      '<div class="form-group span2"><label>Alcance de la Supervisión <span class="req">*</span></label><textarea id="f_descripcion" rows="2" placeholder="Describa el alcance y objetivo de este contrato de supervisión">'+fv('descripcion')+'</textarea></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1C4.567 1 3 2.567 3 4.5c0 2.5 3.5 7.5 3.5 7.5S10 7 10 4.5C10 2.567 8.433 1 6.5 1z" stroke="currentColor" stroke-width="1.2"/><circle cx="6.5" cy="4.5" r="1.2" stroke="currentColor" stroke-width="1.2"/></svg>Área Geográfica de Cobertura</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Departamento <span class="req">*</span></label><select id="f_departamento" onchange="actualizarMunicipios()"><option value="">— Seleccione —</option>'+deptoOpts+'</select></div>' +
+      '<div class="form-group"><label>Municipio <span class="req">*</span></label><select id="f_municipio"><option value="">— Seleccione departamento —</option></select></div>' +
+      '<div class="form-group"><label>Aldea / Barrio / Caserío <span class="req">*</span></label><input type="text" id="f_aldeaBarrio" value="'+fv('aldeaBarrio')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title" style="color:var(--verde)"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 12c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Empresa Supervisora</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Empresa Supervisora <span class="req">*</span></label>'+empresaInput('f_supervisora','supervisora',fv('supervisora'))+'</div>' +
+      '<div class="form-group"><label>N° de Contrato de Supervisión <span class="req">*</span></label><input type="text" id="f_noContratoSup" value="'+fv('noContratoSup')+'" placeholder="Ej. CS-DGCV-2025-001"/></div>' +
+      '<div class="form-group"><label>Coordinador de Supervisión</label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'" placeholder="Nombre del coordinador de la empresa supervisora"/></div>' +
+      '<div class="form-group"><label>Supervisor de Campo</label><input type="text" id="f_supervisorCampo" value="'+fv('supervisorCampo')+'" placeholder="Nombre del supervisor de campo"/></div>' +
+    '</div>' +
+    '<div class="form-group" style="margin-top:6px"><label>Contratos de Construcción que Supervisa</label>' +
+      '<textarea id="f_contratosSupervisa" rows="2" placeholder="Liste los N° de contratos de construcción que cubre esta supervisión. Ej: CONSTR-001, CONSTR-002">'+fv('contratosSupervisa')+'</textarea>' +
+      '<div class="form-hint">Estos contratos estarán disponibles al registrar proyectos de construcción con supervisión externa.</div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 1v2M9 1v2M1 6h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Fechas y Plazo del Contrato de Supervisión</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Fecha de Adjudicación <span class="req">*</span></label><input type="date" id="f_fechaAdjudicacion" value="'+fv('fechaAdjudicacion')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Firma del Contrato</label><input type="date" id="f_fechaContrato" value="'+fv('fechaContrato')+'"/></div>' +
+      '<div class="form-group"><label>Plazo (días calendario)</label><input type="number" id="f_plazo" value="'+fv('plazo')+'" min="1" placeholder="365" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Fecha de Inicio</label><input type="date" id="f_fechaInicio" value="'+fv('fechaInicio')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Finalización Programada</label><input type="date" id="f_fechaFinObra" value="'+fv('fechaFinObra')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1L9 4H12L9.5 6.5L10.5 9.5L6.5 7.5L2.5 9.5L3.5 6.5L1 4H4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>Garantías / Fianzas</div>' +
+    '<div style="background:var(--az7);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--az2);margin-bottom:6px">GARANTÍA DE ANTICIPO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaAnticipo" value="'+fv('nFianzaAnticipo')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFA" value="'+fv('iniFA')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFA" value="'+fv('finFA')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaAnticipo" value="'+fv('montoFianzaAnticipo')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:var(--verde-l);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--verde);margin-bottom:6px">GARANTÍA DE CUMPLIMIENTO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCumplimiento" value="'+fv('nFianzaCumplimiento')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFC" value="'+fv('iniFC')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFC" value="'+fv('finFC')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCumplimiento" value="'+fv('montoFianzaCumplimiento')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:#FDF3E3;border-radius:6px;padding:10px 12px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--amarillo);margin-bottom:6px">GARANTÍA DE CALIDAD</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCalidad" value="'+fv('nFianzaCalidad')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFCal" value="'+fv('iniFCal')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFCal" value="'+fv('finFCal')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCalidad" value="'+fv('montoFianzaCalidad')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M2 10L5 7M5 7L8 10M5 7V3M10 3h1a1 1 0 010 2h-1M10 5v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Endosos de Garantías</div>' +
+    '<div id="endosos-container"></div>' +
+    '<button class="add-row-btn" onclick="addEndoso()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Endoso</button>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera del Contrato de Supervisión</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Monto Modificación / Adenda (L)</label><input type="number" id="f_montoModificacion" value="'+fv('montoModificacion')+'" step="0.01" min="0" placeholder="Solo si aplica" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+    '</div>' +
+    '<div class="form-grid g1" style="margin-top:10px">' +
+      '<div class="form-group"><label>Avance de Ejecución (%) <span class="req">*</span></label>' +
+        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--verde);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--verde);width:40px;text-align:right">0%</span></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
+    '<div id="pagos-container"></div>' +
+    '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
+    '<div class="totalizador" id="totalizador">' +
+      '<div class="tot-item"><strong id="tot-contrato">L 0.00</strong>Monto vigente</div>' +
+      '<div class="tot-item"><strong id="tot-devengado">L 0.00</strong>Total devengado</div>' +
+      '<div class="tot-item"><strong id="tot-deuda">L 0.00</strong>Deuda pendiente</div>' +
+      '<div class="tot-item"><strong id="tot-pct" style="color:var(--verde)">0.00%</strong>Avance financiero</div>' +
+    '</div>' +
+  '</div>'
+  );
+}
+
 // ═══════════════════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════════════════
