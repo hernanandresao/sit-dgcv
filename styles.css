@@ -675,3 +675,33 @@ input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3
   .page-header h2{font-size:15px;}
   .page-actions{flex-wrap:wrap;}
 }
+/* ═══════════ SELECTOR DE TIPO DE PROYECTO ═══════════ */
+.tipo-selector{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:4px 0 8px;}
+.tipo-card{
+  border:2px solid var(--border);border-radius:10px;padding:20px 16px;
+  cursor:pointer;transition:.18s;text-align:center;background:#fff;position:relative;overflow:hidden;
+}
+.tipo-card:hover{border-color:var(--az4);box-shadow:var(--shadow);transform:translateY(-1px);}
+.tipo-card:hover .tipo-card-arrow{opacity:1;}
+.tipo-card-icon{
+  width:56px;height:56px;border-radius:12px;
+  display:flex;align-items:center;justify-content:center;
+  margin:0 auto 12px;
+}
+.tipo-card-title{font-size:14px;font-weight:600;color:var(--az1);margin-bottom:6px;}
+.tipo-card-desc{font-size:11px;color:var(--gris3);line-height:1.5;}
+.tipo-card-arrow{
+  position:absolute;bottom:12px;right:14px;
+  font-size:16px;color:var(--az4);opacity:0;transition:.18s;
+}
+/* Badge tipo en tabla */
+.badge-tipo{
+  display:inline-flex;align-items:center;gap:3px;
+  font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px;
+  letter-spacing:.3px;text-transform:uppercase;
+}
+.badge-tipo.constr{background:var(--az6);color:var(--az2);}
+.badge-tipo.superv{background:var(--verde-l);color:var(--verde);}
+@media(max-width:600px){
+  .tipo-selector{grid-template-columns:1fr;}
+}
