@@ -1057,7 +1057,7 @@ function renderUnidad(u) {
       '<div style="font-weight:500;font-size:12px;line-height:1.3">'+p.proyecto+'</div>' +
       '<div style="font-size:10px;color:var(--gris3);margin-top:2px">'+(p.departamento||'')+(p.municipio?' · '+p.municipio:'')+'</div>' +
       '</td>' +
-      '<td style="font-size:11px;color:var(--gris2)">'+(p.constructora||'—')+'</td>' +
+      '<td style="font-size:11px;color:var(--gris2)">'+((p.tipoProyecto==='supervision'?p.supervisora:p.constructora)||'—')+'</td>' +
       '<td><div style="font-size:11px;font-weight:500;color:var(--az2)">'+cPor+'</div>'+(uMod&&uMod.usuario!==cPor?'<div style="font-size:9px;color:var(--gris3)">Mod: '+uMod.usuario+'</div>':'')+'</td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill az-fill" style="width:'+Math.min(paf,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(paf.toFixed(1))+'%</div></td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill gr-fill" style="width:'+Math.min(pafin,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(pafin.toFixed(1))+'%</div></td>' +
@@ -1088,10 +1088,15 @@ function renderUnidad(u) {
           '<option value="">Todos los estados</option>' +
           ESTADOS.map(function(e){ return '<option>'+e+'</option>'; }).join('') +
         '</select>' +
+        '<select class="filter-select" onchange="filterTipo(this.value,\''+u+'\')" id="filter-tipo-'+u+'">' +
+          '<option value="">Todos los tipos</option>' +
+          '<option value="construccion">Construcción</option>' +
+          '<option value="supervision">Supervisión</option>' +
+        '</select>' +
         (permsNew.canAdd ? '<button class="btn btn-primary" onclick="openForm(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
       '</div>' +
       '<div style="overflow-x:auto"><table class="tbl" id="tbl-'+u+'">' +
-        '<thead><tr><th>N°</th><th>Proyecto</th><th>Constructora</th><th>Registrado por</th><th>Av. Físico</th><th>Av. Financiero</th><th>N° Contrato</th><th>Estado</th><th>Acciones</th></tr></thead>' +
+        '<thead><tr><th>N°</th><th>Proyecto</th><th>Empresa</th><th>Registrado por</th><th>Av. Físico</th><th>Av. Financiero</th><th>N° Contrato</th><th>Estado</th><th>Acciones</th></tr></thead>' +
         '<tbody id="tbody-'+u+'">'+rows+'</tbody>' +
       '</table></div>' +
     '</div>';
@@ -1115,9 +1120,39 @@ function filterTable(q, u) {
     r.style.display = fields.some(function(f){ return f.toLowerCase().includes(qL); }) ? '' : 'none';
   });
 }
-function filterEstado(e, u) {
-  document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r) {
-    r.style.display = (!e || r.textContent.includes(e)) ? '' : 'none';
+function filterEstado(estado, u) {
+  _applyFilters(u);
+}
+
+function filterTipo(tipo, u) {
+  _applyFilters(u);
+}
+
+function _applyFilters(u) {
+  var plist    = DB[u] || [];
+  var estadoEl = document.querySelector('#tbl-'+u+' ~ * select.filter-select, .table-toolbar select.filter-select');
+  // Leer valores actuales de ambos filtros
+  var estadoSel = '';
+  var tipoSel   = '';
+  var selects   = document.querySelectorAll('.table-toolbar select.filter-select');
+  // Buscar el par de selects de esta unidad específica via IDs
+  var tipoEl = document.getElementById('filter-tipo-'+u);
+  if (tipoEl) tipoSel = tipoEl.value;
+  // Estado: primer select del toolbar (el que no tiene id)
+  var tbodyEl = document.getElementById('tbody-'+u);
+  if (tbodyEl) {
+    var toolbar = tbodyEl.closest('.table-wrap') ? tbodyEl.closest('.table-wrap').querySelector('.table-toolbar') : null;
+    if (toolbar) {
+      var allSelects = toolbar.querySelectorAll('select.filter-select');
+      if (allSelects[0]) estadoSel = allSelects[0].value;
+    }
+  }
+  document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r, i) {
+    var p = plist[i];
+    if (!p) { r.style.display = 'none'; return; }
+    var showEstado = !estadoSel || (p.estado || '') === estadoSel;
+    var showTipo   = !tipoSel   || (p.tipoProyecto || 'construccion') === tipoSel;
+    r.style.display = (showEstado && showTipo) ? '' : 'none';
   });
 }
 
