@@ -846,6 +846,8 @@ function getAlertasFianzas() {
         alertas.push({
           proyecto:     p.proyecto || '—',
           unidad:       UNIDADES[unidadKey] ? UNIDADES[unidadKey].nombre : unidadKey,
+          unidadKey:    unidadKey,
+          proyIdx:      (DB[unidadKey]||[]).indexOf(p),
           tipo:         c.tipo,
           n:            c.n,
           fecha:        c.fecha,
@@ -880,13 +882,17 @@ function renderAlertasBanner(alertas) {
     var endosoBadge = a.esEndoso
       ? '<span style="font-size:8px;background:var(--verde-l);color:var(--verde);padding:1px 6px;border-radius:4px;margin-left:5px;font-weight:600;flex-shrink:0;">ENDOSO</span>'
       : '';
-    return '<div class="alerta-row">'
+    var navBtn = (a.unidadKey && a.proyIdx !== undefined && a.proyIdx >= 0)
+      ? '<button onclick="navegarAAlerta(\''+a.unidadKey+'\','+a.proyIdx+')" style="margin-left:auto;flex-shrink:0;background:var(--az2);color:#fff;border:none;border-radius:5px;padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;font-family:var(--font);">Ver proyecto →</button>'
+      : '';
+    return '<div class="alerta-row" style="cursor:pointer" onclick="navegarAAlerta(\''+a.unidadKey+'\','+a.proyIdx+')" title="Clic para ir al proyecto">'
       +'<span class="alerta-tag '+tagClass+'">'+tagText+'</span>'
       +'<span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+a.proyecto+'</span>'
       +endosoBadge
       +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;">'+a.tipo+'</span>'
       +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;font-family:var(--mono);font-size:10px;">'+a.n+'</span>'
       +'<span style="color:var(--gris3);flex-shrink:0;margin-left:8px;">'+a.unidad.split(' ').slice(0,3).join(' ')+'</span>'
+      +navBtn
       +'</div>';
   }).join('');
 
@@ -1055,7 +1061,7 @@ function renderUnidad(u) {
       '<td><div style="font-size:11px;font-weight:500;color:var(--az2)">'+cPor+'</div>'+(uMod&&uMod.usuario!==cPor?'<div style="font-size:9px;color:var(--gris3)">Mod: '+uMod.usuario+'</div>':'')+'</td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill az-fill" style="width:'+Math.min(paf,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(paf.toFixed(1))+'%</div></td>' +
       '<td><div class="mini-bar"><div class="mini-bar-fill gr-fill" style="width:'+Math.min(pafin,100)+'%"></div></div><div style="font-size:9px;font-family:var(--mono)">'+(pafin.toFixed(1))+'%</div></td>' +
-      '<td style="font-size:11px;font-family:var(--mono);color:var(--gris2)">'+(p.noContrato||'—')+'</td>' +
+      '<td style="font-size:11px;font-family:var(--mono);color:var(--gris2)">'+((p.tipoProyecto==\'supervision\'?p.noContratoSup:p.noContrato)||'—')+'</td>' +
       '<td><span class="pill '+sc+'">'+(p.estado||'—')+'</span></td>' +
       '<td><div class="tbl-actions">' +
         '<button class="tbl-btn" onclick="openDetail(\''+u+'\','+i+')">Ver</button>' +
@@ -2436,6 +2442,31 @@ function generarReporte() {
     document.head.appendChild(script);
   } else {
     ejecutarHtml2Pdf();
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  ALERTAS — Navegación al proyecto desde el banner
+// ═══════════════════════════════════════════════════════════
+function navegarAAlerta(unidadKey, proyIdx) {
+  if (!unidadKey) return;
+  // Cerrar banner
+  var list = document.getElementById('alerta-list');
+  if (list) list.style.display = 'none';
+  var icon = document.getElementById('alerta-toggle-icon');
+  if (icon) icon.textContent = '▼ ver detalle';
+
+  // Navegar a la unidad
+  var navEl = document.getElementById('nav-' + unidadKey);
+  showView(unidadKey, navEl);
+
+  // Abrir el detalle del proyecto después de un pequeño delay
+  // para que el DOM de la tabla ya esté renderizado
+  if (proyIdx !== undefined && proyIdx >= 0) {
+    setTimeout(function() {
+      openDetail(unidadKey, proyIdx);
+    }, 150);
   }
 }
 
