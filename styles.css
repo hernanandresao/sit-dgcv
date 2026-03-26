@@ -694,7 +694,7 @@ input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3
   position:absolute;bottom:12px;right:14px;
   font-size:16px;color:var(--az4);opacity:0;transition:.18s;
 }
-/* Badge tipo en tabla */
+/* Badge tipo en tabla y panel de detalle */
 .badge-tipo{
   display:inline-flex;align-items:center;gap:3px;
   font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px;
