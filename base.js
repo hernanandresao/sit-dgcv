@@ -2469,7 +2469,7 @@ function renderMapaPanel() {
   var allP = [];
   Object.keys(DB).forEach(function(unidad) {
     (DB[unidad] || []).forEach(function(p) {
-      if (p.latitud && p.longitudRef) {
+      if (p.latitud && p.longitudRef && (p.tipoProyecto || 'construccion') === 'construccion') {
         allP.push({ p: p, unidad: unidad });
       }
     });
