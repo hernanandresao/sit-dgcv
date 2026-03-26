@@ -520,7 +520,6 @@ function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
       '<div class="form-group"><label>Empresa Supervisora <span class="req">*</span></label>'+empresaInput('f_supervisora','supervisora',fv('supervisora'))+'</div>' +
       '<div class="form-group"><label>N° de Contrato de Supervisión <span class="req">*</span></label><input type="text" id="f_noContratoSup" value="'+fv('noContratoSup')+'" placeholder="Ej. CS-DGCV-2025-001"/></div>' +
       '<div class="form-group"><label>Coordinador de Supervisión</label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'" placeholder="Nombre del coordinador de la empresa supervisora"/></div>' +
-      '<div class="form-group"><label>Supervisor de Campo</label><input type="text" id="f_supervisorCampo" value="'+fv('supervisorCampo')+'" placeholder="Nombre del supervisor de campo"/></div>' +
     '</div>' +
     '<div class="form-group" style="margin-top:6px"><label>Contratos de Construcción que Supervisa</label>' +
       '<textarea id="f_contratosSupervisa" rows="2" placeholder="Liste los N° de contratos de construcción que cubre esta supervisión. Ej: CONSTR-001, CONSTR-002">'+fv('contratosSupervisa')+'</textarea>' +
@@ -1177,12 +1176,13 @@ function openDetail(u, i) {
     '<div class="dp-section"><div class="dp-section-title">'+(p.tipoProyecto==='supervision'?'Empresa Supervisora':'Supervisión')+'</div>' +
       (p.tipoProyecto==='supervision' ?
         dpRow('Empresa Supervisora',p.supervisora)+dpRow('N° Contrato',p.noContratoSup)+
-        dpRow('Coordinador',p.coordinador)+dpRow('Supervisor de Campo',p.supervisorCampo)+
+        dpRow('Coordinador',p.coordinador)+
         dpRow('Contratos que supervisa',p.contratosSupervisa)
       :
         '<div class="dp-row"><span class="dl">Tipo</span><span class="dv">'+
         '<span style="background:'+(p.tipoSupervision==='interna'?'var(--verde-l)':'var(--az6)')+';color:'+(p.tipoSupervision==='interna'?'var(--verde)':'var(--az2)')+';padding:2px 8px;border-radius:8px;font-size:10px">'+(p.tipoSupervision==='interna'?'Supervisión Interna DGCV':'Supervisión Externa')+'</span></span></div>'+
-        (p.tipoSupervision!=='interna' ? dpRow('Empresa Supervisora',p.supervisora)+dpRow('N° Contrato',p.noContratoSup)+dpRow('Supervisor de Campo',p.supervisorCampo) : dpRow('Supervisor de Campo',p.supervisorCampo))
+        (p.tipoSupervision!=='interna' ? dpRow('Empresa Supervisora',p.supervisora)+dpRow('N° Contrato',p.noContratoSup) : '') +
+        dpRow('Supervisor de Campo',p.supervisorCampo)
       ) +
     '</div>' +
     '<div class="dp-section"><div class="dp-section-title">Fechas y Plazo</div>' +
@@ -1509,7 +1509,6 @@ function saveProject() {
       supervisora:         g('f_supervisora'),
       noContratoSup:       g('f_noContratoSup'),
       coordinador:         g('f_coordinador'),
-      supervisorCampo:     g('f_supervisorCampo'),
       contratosSupervisa:  g('f_contratosSupervisa'),
       fechaAdjudicacion:   g('f_fechaAdjudicacion'),
       fechaContrato:       g('f_fechaContrato'),
@@ -2394,19 +2393,50 @@ function generarReporte() {
     +'<div class="footer">Reporte generado por el Sistema de Seguimiento DGCV · '+fecha+' · Secretaría de Infraestructura y Transporte · República de Honduras</div>'
     +'</div></body></html>';
 
-  // Abrir en ventana nueva y lanzar impresión/guardar como PDF
-  var win = window.open('', '_blank', 'width=1100,height=800');
-  if (!win) { showToast('Permite las ventanas emergentes para generar el PDF.', 'err'); return; }
-  win.document.write(html);
-  win.document.close();
-  // Pequeño delay para que el navegador termine de renderizar antes de imprimir
-  win.onload = function() {
-    setTimeout(function() {
-      win.focus();
-      win.print();
-    }, 600);
-  };
-  showToast('Se abrió el reporte — selecciona "Guardar como PDF" en el diálogo de impresión.', 'ok');
+  // Generar PDF directamente usando html2pdf.js
+  var nombreArchivo = 'Reporte_DGCV_' + new Date().toISOString().slice(0,10) + '.pdf';
+  showToast('Generando PDF, espere un momento...', 'ok');
+
+  function ejecutarHtml2Pdf() {
+    var contenedor = document.createElement('div');
+    contenedor.innerHTML = html;
+    contenedor.style.position = 'absolute';
+    contenedor.style.left = '-9999px';
+    contenedor.style.top = '0';
+    document.body.appendChild(contenedor);
+
+    var opt = {
+      margin:       [8, 8, 8, 8],
+      filename:     nombreArchivo,
+      image:        { type: 'jpeg', quality: 0.97 },
+      html2canvas:  { scale: 2, useCORS: true, logging: false },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' },
+      pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] }
+    };
+
+    html2pdf().set(opt).from(contenedor.querySelector('.page') || contenedor).save()
+      .then(function() {
+        document.body.removeChild(contenedor);
+        showToast('✓ PDF descargado: ' + nombreArchivo, 'ok');
+      })
+      .catch(function(e) {
+        document.body.removeChild(contenedor);
+        showToast('Error al generar PDF: ' + e.message, 'err');
+      });
+  }
+
+  // Cargar html2pdf.js si no está disponible
+  if (typeof html2pdf === 'undefined') {
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    script.onload = ejecutarHtml2Pdf;
+    script.onerror = function() {
+      showToast('No se pudo cargar la librería de PDF. Verifique su conexión.', 'err');
+    };
+    document.head.appendChild(script);
+  } else {
+    ejecutarHtml2Pdf();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
