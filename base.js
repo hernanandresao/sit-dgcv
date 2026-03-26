@@ -776,6 +776,7 @@ function showView(view, el) {
   else if (view === 'usuarios') renderUsuariosPanel();
   else if (view === 'empresas') renderEmpresasPanel();
   else if (view === 'formatos') renderFormatosPanel();
+  else if (view === 'mapa')     renderMapaPanel();
   else renderUnidad(view);
   if (isMobile && isMobile()) closeNav();
 }
@@ -1952,86 +1953,41 @@ async function enviarResetPassword(email) {
 // y copie el link aquí.
 var FORMATOS_CONFIG = [
   {
-    id:          'estimacion',
-    titulo:      'Estimación de Obras',
-    descripcion: 'Formato oficial para el trámite y presentación de estimaciones de avance de obras. Incluye desglose por partidas, cantidades ejecutadas y montos correspondientes.',
+    id:          'formatos',
+    titulo:      'Formatos Oficiales DGCV',
+    descripcion: 'Carpeta con todos los formatos oficiales para trámites administrativos de proyectos viales: estimaciones, anticipos, pagos a supervisores y demás documentos requeridos.',
     clase:       'estimacion',
     iconoBg:     'var(--az7)',
     iconoColor:  'var(--az2)',
     btnClase:    'az',
-    badge:       'Obras Civiles',
+    badge:       'Todos los formatos',
     badgeBg:     'var(--az7)',
     badgeColor:  'var(--az2)',
-    url:         'https://drive.google.com/drive/folders/1zu3ZU46QQVdIZnWWkdgNi265RkWCEwNs?usp=sharing',   // ← Pegue aquí el link de Google Drive
-    icono: '<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="2" width="18" height="24" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M4 2l6 6H4" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M4 8h6V2" stroke="currentColor" stroke-width="1.4"/><path d="M8 14h10M8 18h10M8 22h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><rect x="18" y="18" width="10" height="10" rx="2" fill="var(--az6)" stroke="var(--az3)" stroke-width="1.3"/><path d="M21 23h4M23 21v4" stroke="var(--az2)" stroke-width="1.3" stroke-linecap="round"/></svg>'
-  },
-  {
-    id:          'supervision',
-    titulo:      'Pago a Supervisores',
-    descripcion: 'Formato para solicitud y tramitación de pagos a empresas supervisoras externas. Incluye período de supervisión, porcentaje de avance verificado y monto a pagar.',
-    clase:       'supervision',
-    iconoBg:     'var(--verde-l)',
-    iconoColor:  'var(--verde)',
-    btnClase:    'verde',
-    badge:       'Supervisión',
-    badgeBg:     'var(--verde-l)',
-    badgeColor:  'var(--verde)',
-    url:         'https://drive.google.com/drive/folders/1Q5QjuCpcjeuLCFoyUBzICHxYftXml3ow?usp=sharing',   // ← Pegue aquí el link de Google Drive
-    icono: '<svg viewBox="0 0 32 32" fill="none"><circle cx="13" cy="10" r="5" stroke="currentColor" stroke-width="1.6"/><path d="M4 26c0-5 4-8 9-8s9 3 9 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M21 14l2.5 2.5L28 12" stroke="var(--verde)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="14" r="6" stroke="var(--verde)" stroke-width="1.4"/></svg>'
-  },
-  {
-    id:          'anticipo',
-    titulo:      'Anticipo de Obra',
-    descripcion: 'Formato para la solicitud de anticipo de contrato. Incluye datos del proyecto, monto total, porcentaje de anticipo solicitado y documentos de garantía requeridos.',
-    clase:       'anticipo',
-    iconoBg:     'var(--gold6)',
-    iconoColor:  'var(--gold1)',
-    btnClase:    'gold',
-    badge:       'Financiero',
-    badgeBg:     'var(--gold6)',
-    badgeColor:  'var(--gold1)',
-    url:         'https://drive.google.com/drive/folders/1eobYZ5RF4ZxxUHFpB9FTh-7S8QzvbBi-?usp=sharing',   // ← Pegue aquí el link de Google Drive
-    icono: '<svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="12" stroke="currentColor" stroke-width="1.6"/><path d="M16 8v2M16 22v2M12 12.5c0-1.7 1.3-3 4-3s4 1.3 4 3-1.5 2.5-4 3-4 1.5-4 3 1.3 3 4 3 4-1.3 4-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
+    url:         'https://drive.google.com/drive/folders/1zCjJ3p3y4EKELvU3F2i4vTvczXE9TnxB?usp=sharing',
+    icono: '<svg viewBox="0 0 32 32" fill="none"><rect x="2" y="8" width="28" height="20" rx="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M2 14h28" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M2 11L8 8h7l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 20h14M9 24h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>'
   }
 ];
 
 function renderFormatosPanel() {
-  var tarjetas = FORMATOS_CONFIG.map(function(f) {
-    var disponible = f.url && f.url !== 'PENDIENTE';
-    var btnHtml = disponible
-      ? '<a href="'+f.url+'" target="_blank" rel="noopener" class="btn-formato '+f.btnClase+'">'
-          +'<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3l4 4-4 4" stroke="white" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-          +'Abrir en Google Drive</a>'
-      : '<button class="btn-formato disabled">'
-          +'<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M7 4.5V7.5M7 9.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>'
-          +'Link pendiente de configurar</button>';
-
-    return '<div class="formato-card '+f.clase+'">'
-      +'<div class="formato-icon" style="background:'+f.iconoBg+';color:'+f.iconoColor+';">'+f.icono+'</div>'
-      +'<span class="formato-badge" style="background:'+f.badgeBg+';color:'+f.badgeColor+';">'+f.badge+'</span>'
-      +'<h3>'+f.titulo+'</h3>'
-      +'<p>'+f.descripcion+'</p>'
-      + btnHtml
-      +'</div>';
-  }).join('');
-
-  var hayPendientes = FORMATOS_CONFIG.some(function(f){ return !f.url || f.url==='PENDIENTE'; });
-  var infoBanner = hayPendientes
-    ? '<div class="formato-info">'
-        +'<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="var(--az2)" stroke-width="1.2"/><path d="M8 5v3.5M8 10.5v.5" stroke="var(--az2)" stroke-width="1.3" stroke-linecap="round"/></svg>'
-        +'<span><strong>Configuración requerida:</strong> Uno o más formatos no tienen link asignado todavía. Para activarlos, comparta la carpeta o archivo en Google Drive como "Cualquiera con el enlace puede ver", copie el link y péguelo en la variable <code style="background:var(--az6);padding:1px 5px;border-radius:3px;">FORMATOS_CONFIG</code> dentro del código HTML.</span>'
-      +'</div>'
-    : '';
-
+  var f = FORMATOS_CONFIG[0];
   document.getElementById('mainContent').innerHTML =
     '<div class="page-header">'
       +'<h2>Formatos Oficiales</h2>'
-      +'<p>Descargue los formatos necesarios para trámites administrativos de proyectos viales.</p>'
+      +'<p>Acceda a los formatos necesarios para trámites administrativos de proyectos viales.</p>'
     +'</div>'
-    + infoBanner
-    +'<div class="formatos-grid">'+tarjetas+'</div>';
+    +'<div style="display:flex;justify-content:center;margin-top:20px;">'
+      +'<div class="formato-card formatos" style="max-width:500px;width:100%;">'
+        +'<div class="formato-icon" style="background:var(--az7);color:var(--az2);width:80px;height:80px;border-radius:18px;">'+f.icono+'</div>'
+        +'<span class="formato-badge" style="background:var(--az7);color:var(--az2);">'+f.badge+'</span>'
+        +'<h3 style="font-size:16px;">'+f.titulo+'</h3>'
+        +'<p style="font-size:12px;">'+f.descripcion+'</p>'
+        +'<a href="'+f.url+'" target="_blank" rel="noopener" class="btn-formato az" style="font-size:13px;padding:11px 28px;">'
+          +'<svg width="15" height="15" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3l4 4-4 4" stroke="white" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+          +'Abrir carpeta en Google Drive'
+        +'</a>'
+      +'</div>'
+    +'</div>';
 }
-
 
 function renderEmpresasPanel() {
   if (!currentUser || !currentUser.esGlobalAdmin) {
@@ -2502,6 +2458,197 @@ function navegarAAlerta(unidadKey, proyIdx) {
     setTimeout(function() {
       openDetail(unidadKey, proyIdx);
     }, 150);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  MAPA — Vista de proyectos georreferenciados
+// ═══════════════════════════════════════════════════════════
+function renderMapaPanel() {
+  var allP = [];
+  Object.keys(DB).forEach(function(unidad) {
+    (DB[unidad] || []).forEach(function(p) {
+      if (p.latitud && p.longitudRef) {
+        allP.push({ p: p, unidad: unidad });
+      }
+    });
+  });
+
+  var sinCoords = Object.values(DB).flat().length - allP.length;
+
+  document.getElementById('mainContent').innerHTML =
+    '<div class="page-header" style="margin-bottom:12px;">' +
+      '<h2>Mapa de Proyectos — Red Vial Nacional</h2>' +
+      '<p>' + allP.length + ' proyectos georreferenciados' +
+        (sinCoords > 0 ? ' · <span style="color:var(--gris3)">' + sinCoords + ' sin coordenadas</span>' : '') +
+      '</p>' +
+    '</div>' +
+    // Controles
+    '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">' +
+      '<select class="filter-select" id="mapa-filtro-unidad" onchange="actualizarMapa()" style="font-size:12px;">' +
+        '<option value="">Todas las unidades</option>' +
+        Object.entries(UNIDADES).map(function(e){ return '<option value="'+e[0]+'">'+e[1].nombre+'</option>'; }).join('') +
+      '</select>' +
+      '<select class="filter-select" id="mapa-filtro-tipo" onchange="actualizarMapa()" style="font-size:12px;">' +
+        '<option value="">Construcción y Supervisión</option>' +
+        '<option value="construccion">Solo Construcción</option>' +
+        '<option value="supervision">Solo Supervisión</option>' +
+      '</select>' +
+      '<select class="filter-select" id="mapa-filtro-estado" onchange="actualizarMapa()" style="font-size:12px;">' +
+        '<option value="">Todos los estados</option>' +
+        ESTADOS.map(function(e){ return '<option>'+e+'</option>'; }).join('') +
+      '</select>' +
+      '<span id="mapa-contador" style="font-size:11px;color:var(--gris3);margin-left:4px;"></span>' +
+    '</div>' +
+    // Leyenda
+    '<div style="display:flex;gap:14px;margin-bottom:10px;flex-wrap:wrap;">' +
+      '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--gris2)"><span style="width:12px;height:12px;border-radius:50%;background:#1268C4;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 1px #1268C4"></span>Construcción</div>' +
+      '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--gris2)"><span style="width:12px;height:12px;border-radius:50%;background:#0D7A4E;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 1px #0D7A4E"></span>Supervisión</div>' +
+      '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--gris2)"><span style="width:12px;height:12px;border-radius:50%;background:#C0392B;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 1px #C0392B"></span>Suspendido</div>' +
+      '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--gris2)"><span style="width:12px;height:12px;border-radius:50%;background:#7B8FA0;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 1px #7B8FA0"></span>Terminado</div>' +
+    '</div>' +
+    '<div id="mapa-container" style="height:520px;border-radius:10px;border:1px solid var(--border);overflow:hidden;background:#e8f0f7;position:relative;">' +
+      '<div id="sit-map" style="height:100%;width:100%;"></div>' +
+    '</div>';
+
+  // Cargar Leaflet si no está cargado aún
+  if (typeof L === 'undefined') {
+    _cargarLeaflet(function() { _initMapa(allP); });
+  } else {
+    _initMapa(allP);
+  }
+}
+
+var _mapaInstance = null;
+var _mapaMarkers  = null;
+
+function _cargarLeaflet(cb) {
+  var css  = document.createElement('link');
+  css.rel  = 'stylesheet';
+  css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+  document.head.appendChild(css);
+
+  var js   = document.createElement('script');
+  js.src   = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+  js.onload = cb;
+  document.head.appendChild(js);
+}
+
+function _initMapa(allP) {
+  // Si ya hay un mapa instanciado, destruirlo
+  if (_mapaInstance) { _mapaInstance.remove(); _mapaInstance = null; }
+
+  var mapEl = document.getElementById('sit-map');
+  if (!mapEl) return;
+
+  // Centrar en Honduras
+  _mapaInstance = L.map('sit-map', { zoomControl: true }).setView([14.5, -87.2], 7);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 18
+  }).addTo(_mapaInstance);
+
+  _mapaMarkers = L.layerGroup().addTo(_mapaInstance);
+  _renderMarcadores(allP);
+}
+
+function _colorPunto(p) {
+  if (p.estado === 'Suspendido') return '#C0392B';
+  if (p.estado === 'Terminado')  return '#7B8FA0';
+  if ((p.tipoProyecto || 'construccion') === 'supervision') return '#0D7A4E';
+  return '#1268C4';
+}
+
+function _renderMarcadores(filtrados) {
+  if (!_mapaMarkers) return;
+  _mapaMarkers.clearLayers();
+  var count = 0;
+
+  filtrados.forEach(function(item) {
+    var p   = item.p;
+    var lat = parseFloat(p.latitud);
+    var lng = parseFloat(p.longitudRef);
+    if (isNaN(lat) || isNaN(lng)) return;
+    if (lat < 13 || lat > 17 || lng < -90 || lng > -83) return; // fuera de Honduras
+
+    var color  = _colorPunto(p);
+    var tipo   = (p.tipoProyecto || 'construccion') === 'supervision' ? 'Supervisión' : 'Construcción';
+    var unidNm = UNIDADES[item.unidad] ? UNIDADES[item.unidad].nombre : item.unidad;
+    var empresa = (p.tipoProyecto === 'supervision' ? p.supervisora : p.constructora) || '—';
+    var avFis  = parseFloat(p.avanceFisico) || 0;
+    var avFin  = parseFloat(p.avanceFinanciero) || 0;
+
+    var icon = L.divIcon({
+      className: '',
+      html: '<div style="width:14px;height:14px;border-radius:50%;background:' + color + ';border:2.5px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4);cursor:pointer;transition:.15s;" title="' + (p.proyecto||'').replace(/"/g,'&quot;') + '"></div>',
+      iconSize:   [14, 14],
+      iconAnchor: [7, 7]
+    });
+
+    var popup = L.popup({ maxWidth: 280, className: 'sit-popup' }).setContent(
+      '<div style="font-family:\'IBM Plex Sans\',sans-serif;font-size:12px;line-height:1.5;">' +
+      '<div style="background:' + color + ';color:#fff;padding:7px 10px;margin:-8px -8px 8px;border-radius:4px 4px 0 0;font-weight:600;font-size:11px;">' +
+        tipo + ' · ' + unidNm.split(' ').slice(0,3).join(' ') +
+      '</div>' +
+      '<div style="font-weight:600;color:#001233;margin-bottom:5px;line-height:1.4;">' + (p.proyecto || '—') + '</div>' +
+      '<div style="color:#7B8FA0;font-size:10px;margin-bottom:6px;">' + (p.departamento||'') + (p.municipio?' · '+p.municipio:'') + '</div>' +
+      '<div style="font-size:11px;margin-bottom:4px;color:#3D4F60;">Empresa: <strong>' + empresa + '</strong></div>' +
+      '<div style="font-size:11px;margin-bottom:6px;color:#3D4F60;">Estado: <strong>' + (p.estado||'—') + '</strong></div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
+        '<div style="flex:1;background:#f0f4f8;border-radius:5px;padding:5px 7px;text-align:center;">' +
+          '<div style="font-size:16px;font-weight:300;color:#0057CC;font-family:monospace;">' + avFis.toFixed(1) + '%</div>' +
+          '<div style="font-size:9px;color:#7B8FA0;">Físico</div>' +
+        '</div>' +
+        '<div style="flex:1;background:#f0f4f8;border-radius:5px;padding:5px 7px;text-align:center;">' +
+          '<div style="font-size:16px;font-weight:300;color:#0D7A4E;font-family:monospace;">' + avFin.toFixed(1) + '%</div>' +
+          '<div style="font-size:9px;color:#7B8FA0;">Financiero</div>' +
+        '</div>' +
+      '</div>' +
+      '<button onclick="navegarDesdeMapaAProyecto(\'' + item.unidad + '\',' + (DB[item.unidad]||[]).indexOf(p) + ')" ' +
+        'style="width:100%;background:#002B6B;color:#fff;border:none;border-radius:5px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">Ver detalle completo →</button>' +
+      '</div>'
+    );
+
+    L.marker([lat, lng], { icon: icon })
+      .bindPopup(popup)
+      .addTo(_mapaMarkers);
+    count++;
+  });
+
+  var contador = document.getElementById('mapa-contador');
+  if (contador) contador.textContent = count + ' puntos visibles';
+}
+
+function actualizarMapa() {
+  var filtroUnidad = (document.getElementById('mapa-filtro-unidad') || {}).value || '';
+  var filtroTipo   = (document.getElementById('mapa-filtro-tipo')   || {}).value || '';
+  var filtroEstado = (document.getElementById('mapa-filtro-estado') || {}).value || '';
+
+  var allP = [];
+  Object.keys(DB).forEach(function(unidad) {
+    if (filtroUnidad && unidad !== filtroUnidad) return;
+    (DB[unidad] || []).forEach(function(p) {
+      if (!p.latitud || !p.longitudRef) return;
+      if (filtroTipo   && (p.tipoProyecto||'construccion') !== filtroTipo)   return;
+      if (filtroEstado && p.estado !== filtroEstado) return;
+      allP.push({ p: p, unidad: unidad });
+    });
+  });
+
+  _renderMarcadores(allP);
+}
+
+function navegarDesdeMapaAProyecto(unidadKey, proyIdx) {
+  if (!_mapaInstance) return;
+  // Cerrar cualquier popup abierto
+  _mapaInstance.closePopup();
+  // Navegar y abrir detalle
+  var navEl = document.getElementById('nav-' + unidadKey);
+  showView(unidadKey, navEl);
+  if (proyIdx >= 0) {
+    setTimeout(function() { openDetail(unidadKey, proyIdx); }, 150);
   }
 }
 
