@@ -130,6 +130,7 @@ var currentView = 'dashboard';
 var editingId   = null;
 var endosoCount = 0;
 var pagoCount   = 0;
+var modCount    = 0;
 var dbOnline    = false;
 var contratosSupervision = [];
 
@@ -309,6 +310,7 @@ function selectTipoProyecto(tipo) {
   editingId.tipo = tipo;
   var u = editingId.u;
   var p = {};
+  modCount = 0;
   var titulo = tipo === 'construccion' ? 'Nuevo Proyecto de Construcción' : 'Nuevo Contrato de Supervisión';
   document.getElementById('modalTitle').textContent = titulo + ' — ' + UNIDADES[u].nombre;
   var btnGuardar = document.querySelector('.modal-footer .btn-primary');
@@ -469,10 +471,11 @@ function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
   '</div>' +
   '<div class="form-section">' +
     '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera y Avances</div>' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-      '<div class="form-group"><label>Monto Modificación / Adenda (L)</label><input type="number" id="f_montoModificacion" value="'+fv('montoModificacion')+'" step="0.01" min="0" placeholder="Solo si aplica" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-    '</div>' +
+    '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+    '<input type="hidden" id="f_montoModificacion" value="'+fv('montoModificacion')+'"/>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Modificaciones / Órdenes de Cambio</div>' +
+    '<div id="mods-container"></div>' +
+    '<button class="add-row-btn" onclick="addModificacion()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Modificación / Orden de Cambio</button>' +
     '<div class="form-grid g1" style="margin-top:10px">' +
       '<div class="form-group"><label>Avance Físico de la Obra (%) <span class="req">*</span></label>' +
         '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">0%</span></div>' +
@@ -573,10 +576,11 @@ function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
   '</div>' +
   '<div class="form-section">' +
     '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera del Contrato de Supervisión</div>' +
-    '<div class="form-grid g2">' +
-      '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-      '<div class="form-group"><label>Monto Modificación / Adenda (L)</label><input type="number" id="f_montoModificacion" value="'+fv('montoModificacion')+'" step="0.01" min="0" placeholder="Solo si aplica" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-    '</div>' +
+    '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+    '<input type="hidden" id="f_montoModificacion" value="'+fv('montoModificacion')+'"/>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Modificaciones / Órdenes de Cambio</div>' +
+    '<div id="mods-container"></div>' +
+    '<button class="add-row-btn" onclick="addModificacion()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Modificación / Orden de Cambio</button>' +
     '<div class="form-grid g1" style="margin-top:10px">' +
       '<div class="form-group"><label>Avance de Ejecución (%) <span class="req">*</span></label>' +
         '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--verde);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--verde);width:40px;text-align:right">0%</span></div>' +
@@ -808,8 +812,8 @@ function getAlertasFianzas() {
     var unidadKey = entry[0]; var proyectos = entry[1];
     (proyectos||[]).forEach(function(p) {
 
-      // CONDICIÓN 2: proyecto Terminado → no genera alertas de fianzas
-      if (p.estado === 'Terminado') return;
+      // CONDICIÓN 2: proyecto Terminado o Suspendido → no genera alertas de fianzas
+      if (p.estado === 'Terminado' || p.estado === 'Suspendido') return;
 
       // CONDICIÓN 3: devuelve la fecha efectiva de alerta para una fianza.
       // Si existe un endoso vinculado a esa fianza con nueva fecha de vencimiento,
@@ -1239,7 +1243,23 @@ function openDetail(u, i) {
     '</div>' +
     '<div class="dp-section"><div class="dp-section-title">Información Financiera</div>' +
       dpRow('Monto de Contrato', 'L '+fmtL(p.montoContratoInicial)) +
-      (p.montoModificacion ? dpRow('Modificación / Adenda','<span style="color:var(--amarillo)">L '+fmtL(p.montoModificacion)+'</span>') : '') +
+      (function(){
+        var mods = p.modificaciones && p.modificaciones.length ? p.modificaciones
+                 : (p.montoModificacion ? [{ tipo:'Modificación', numero:'', monto:p.montoModificacion, plazo:'', fecha:'', descripcion:'Dato importado' }] : []);
+        if (!mods.length) return '';
+        return mods.map(function(m, mi) {
+          var isOC = m.tipo === 'Orden de Cambio';
+          var bg   = isOC ? 'var(--amarillo-l)' : 'var(--az7)';
+          var clr  = isOC ? 'var(--amarillo)'   : 'var(--az2)';
+          return '<div style="background:'+bg+';border-radius:5px;padding:7px 10px;margin-bottom:5px;font-size:11px;">' +
+            '<div style="font-weight:600;color:'+clr+';margin-bottom:3px;">'+(m.tipo||'Modificación')+' N° '+(mi+1)+(m.numero?' — Doc. '+m.numero:'')+'</div>' +
+            dpRow('Monto', '<span style="color:var(--amarillo)">L '+fmtL(m.monto)+'</span>') +
+            (m.plazo ? dpRow('Nuevo Plazo', m.plazo+' días') : '') +
+            (m.fecha ? dpRow('Fecha', m.fecha) : '') +
+            (m.descripcion ? dpRow('Descripción', m.descripcion) : '') +
+          '</div>';
+        }).join('');
+      })() +
       dpRow('Total Devengado', 'L '+fmtL(p.totalDevengado)) +
       dpRow('Deuda Pendiente', '<span style="color:'+(parseFloat(p.deuda)<0?'var(--rojo)':'inherit')+'">L '+fmtL(p.deuda)+'</span>') +
     '</div>' +
@@ -1270,6 +1290,23 @@ function closeDetail(e) {
   document.getElementById('detailOverlay').classList.remove('open');
 }
 
+
+// Compatibilidad hacia atrás: proyectos importados solo tienen montoModificacion
+// (string), no el array modificaciones. Convertir al nuevo formato.
+function _legacyModFromField(p) {
+  if (!p || !p.montoModificacion) return [];
+  var m = parseFloat(p.montoModificacion);
+  if (!m || m <= 0) return [];
+  return [{
+    tipo:        'Modificación',
+    numero:      '',
+    monto:       String(m),
+    plazo:       p.plazo || '',
+    fecha:       '',
+    descripcion: 'Dato importado — complete los campos faltantes'
+  }];
+}
+
 // ═══════════════════════════════════════════════════════════
 //  FORMULARIO — ABRIR
 // ═══════════════════════════════════════════════════════════
@@ -1281,7 +1318,7 @@ function openForm(u, idx) {
   if (!isNew && !perms.canEdit) { showToast('No tiene permiso para editar este proyecto.', 'err'); return; }
 
   editingId = { u: u, idx: idx, tipo: null };
-  endosoCount = 0; pagoCount = 0;
+  endosoCount = 0; pagoCount = 0; modCount = 0;
   cargarContratosSupervision();
 
   var p = proj || {};
@@ -1328,6 +1365,7 @@ function openForm(u, idx) {
 
   document.getElementById('modalOverlay').classList.add('open');
   setTimeout(syncEstadoAvance, 0);
+  (p.modificaciones || _legacyModFromField(p)).forEach(function(m) { addModificacion(m); });
   (p.endosos || []).forEach(function(e)  { addEndoso(e); });
   (p.pagos   || []).forEach(function(pg) { addPago(pg); });
   if (!(p.pagos||[]).length) addPago();
@@ -1426,33 +1464,83 @@ function addEndoso(data) {
   con.appendChild(div);
 }
 
-// ── Pagos ───────────────────────────────
-function addPago(data) {
+
+function _onModTipoChange(sel) {
+  var n    = sel.getAttribute('data-n');
+  var card = document.getElementById('mod-' + n);
+  if (!card) return;
+  var isOC = sel.value === 'Orden de Cambio';
+  var tag  = card.querySelector('.mod-tag');
+  if (tag) {
+    tag.style.background = isOC ? 'var(--amarillo-l)' : 'var(--az7)';
+    tag.style.color      = isOC ? 'var(--amarillo)'   : 'var(--az2)';
+    tag.textContent      = sel.value + ' N° ' + n;
+  }
+}
+
+// ── Modificaciones / Órdenes de Cambio ──────────────────────
+function addModificacion(data) {
   data = data || {};
-  pagoCount++;
-  var n   = pagoCount;
-  var con = document.getElementById('pagos-container');
+  modCount++;
+  var n   = modCount;
+  var con = document.getElementById('mods-container');
+  if (!con) return;
   var div = document.createElement('div');
-  div.className = 'pago-card'; div.id = 'pago-' + n;
+  div.className = 'mod-card'; div.id = 'mod-' + n;
+
+  var isOC     = data.tipo === 'Orden de Cambio';
+  var tipoOpts = ['Modificación','Orden de Cambio'].map(function(t) {
+    return '<option value="' + t + '"' + (data.tipo === t ? ' selected' : '') + '>' + t + '</option>';
+  }).join('');
+
   div.innerHTML =
-    '<div class="pago-num">Pago N° '+n+'</div>' +
-    '<button class="pago-remove" onclick="document.getElementById(\'pago-'+n+'\').remove();recalcPagos()">✕</button>' +
-    '<div class="form-grid g2" style="margin-bottom:8px">' +
-      '<div class="form-group"><label>Monto del Pago (L)</label><input type="number" class="pago-monto" value="'+(data.monto||'')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-      '<div class="form-group"><label>Fecha de Ingreso / Registro</label><input type="date" class="pago-fechaIngreso" value="'+(data.fechaIngreso||data.fecha||'')+'"/></div>' +
-    '</div>' +
-    '<div class="form-grid g3">' +
-      '<div class="form-group"><label>Período — Fecha Inicio</label><input type="date" class="pago-periodoIni" value="'+(data.periodoIni||'')+'"/></div>' +
-      '<div class="form-group"><label>Período — Fecha Fin</label><input type="date" class="pago-periodoFin" value="'+(data.periodoFin||'')+'"/></div>' +
-      '<div class="form-group"><label>Contexto / Descripción</label><input type="text" class="pago-ctx" value="'+(data.contexto||'')+'" placeholder="Ej. Anticipo, Estimación N°1…"/></div>' +
+    '<div class="mod-tag" id="mod-tag-' + n + '" style="background:' + (isOC ? 'var(--amarillo-l)' : 'var(--az7)') + ';color:' + (isOC ? 'var(--amarillo)' : 'var(--az2)') + ';">' + (data.tipo || 'Modificación') + ' N° ' + n + '</div>' +
+    '<button class="mod-remove" onclick="document.getElementById(\'mod-' + n + '\').remove();syncMontoModificacion();recalcPagos()">✕</button>' +
+    '<div class="form-grid g3" style="margin-bottom:0">' +
+      '<div class="form-group"><label>Tipo <span class="req">*</span></label>' +
+        '<select class="mod-tipo" data-n="' + n + '" onchange="_onModTipoChange(this)">' + tipoOpts + '</select></div>' +
+      '<div class="form-group"><label>N° Documento <span class="req">*</span></label>' +
+        '<input type="text" class="mod-numero" value="' + (data.numero || data.numDocumento || '') + '" placeholder="Ej. 001" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Monto (L) <span class="req">*</span></label>' +
+        '<input type="number" class="mod-monto" value="' + (data.monto || '') + '" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');syncMontoModificacion();recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Plazo (días) <span class="req">*</span></label>' +
+        '<input type="text" class="mod-plazo" value="' + (data.plazo || '') + '" placeholder="Ej. 30" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Fecha <span class="req">*</span></label>' +
+        '<input type="date" class="mod-fecha" value="' + (data.fecha || '') + '"/></div>' +
+      '<div class="form-group"><label>Descripción <span class="req">*</span></label>' +
+        '<input type="text" class="mod-descripcion" value="' + (data.descripcion || '') + '" placeholder="Motivo o alcance"/></div>' +
     '</div>';
+
   con.appendChild(div);
+  syncMontoModificacion();
   recalcPagos();
+}
+
+function getUltimoMontoMod() {
+  var cards = document.querySelectorAll('#mods-container .mod-card');
+  if (!cards.length) return 0;
+  var last = cards[cards.length - 1];
+  return parseFloat((last.querySelector('.mod-monto') || {}).value) || 0;
+}
+
+function getUltimoPlazoMod() {
+  var cards = document.querySelectorAll('#mods-container .mod-card');
+  if (!cards.length) return '';
+  var last = cards[cards.length - 1];
+  return (last.querySelector('.mod-plazo') || {}).value || '';
+}
+
+function syncMontoModificacion() {
+  var hidden = document.getElementById('f_montoModificacion');
+  if (!hidden) return;
+  var m = getUltimoMontoMod();
+  hidden.value = m > 0 ? String(m) : '';
 }
 
 function recalcPagos() {
   var mI  = parseFloat((document.getElementById('f_montoContratoInicial')||{}).value) || 0;
-  var mM  = parseFloat((document.getElementById('f_montoModificacion')||{}).value)    || 0;
+  var mM  = getUltimoMontoMod();
+  if (!mM) mM = parseFloat((document.getElementById('f_montoModificacion')||{}).value) || 0;
   var vig = mM > 0 ? mM : mI;
   var dev = 0;
   document.querySelectorAll('#pagos-container .pago-monto').forEach(function(i) { dev += parseFloat(i.value) || 0; });
@@ -1473,6 +1561,22 @@ function saveProject() {
   var idx  = editingId.idx;
   var tipo = editingId.tipo || 'construccion';
   function g(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+
+  // ── Recolectar modificaciones ─────────────────────────────
+  var modificaciones = [];
+  document.querySelectorAll('#mods-container .mod-card').forEach(function(card) {
+    var m = {
+      tipo:        (card.querySelector('.mod-tipo')        ||{}).value||'',
+      // .mod-numero es el nombre canónico; .mod-num es fallback de versión anterior
+      numero:      ((card.querySelector('.mod-numero')||card.querySelector('.mod-num')||{}).value)||'',
+      monto:       (card.querySelector('.mod-monto')       ||{}).value||'',
+      plazo:       (card.querySelector('.mod-plazo')       ||{}).value||'',
+      fecha:       (card.querySelector('.mod-fecha')       ||{}).value||'',
+      // .mod-descripcion es canónico; .mod-desc es fallback
+      descripcion: ((card.querySelector('.mod-descripcion')||card.querySelector('.mod-desc')||{}).value)||''
+    };
+    if (m.monto || m.numero) modificaciones.push(m);
+  });
 
   var endosos = [];
   document.querySelectorAll('#endosos-container .endoso-card').forEach(function(card) {
@@ -1500,7 +1604,17 @@ function saveProject() {
   });
 
   var mI    = parseFloat(g('f_montoContratoInicial')) || 0;
-  var mM    = parseFloat(g('f_montoModificacion'))    || 0;
+  // Monto vigente = última modificación si existe, sino el inicial
+  var mM = 0;
+  var plazoFinal = g('f_plazo');
+  if (modificaciones.length > 0) {
+    var lastMod = modificaciones[modificaciones.length - 1];
+    mM = parseFloat(lastMod.monto) || 0;
+    if (lastMod.plazo) plazoFinal = lastMod.plazo;
+  } else {
+    // Compatibilidad con proyectos importados que solo tienen montoModificacion
+    mM = parseFloat(g('f_montoModificacion')) || 0;
+  }
   var vig   = mM > 0 ? mM : mI;
   var dev   = pagos.reduce(function(a,pg){ return a + (parseFloat(pg.monto)||0); }, 0);
   var avFin = vig > 0 ? parseFloat((dev/vig*100).toFixed(2)) : 0;
@@ -1562,7 +1676,9 @@ function saveProject() {
       nFianzaCalidad:      g('f_nFianzaCalidad'),      iniFCal: g('f_iniFCal'), finFCal: g('f_finFCal'), montoFianzaCalidad:      g('f_montoFianzaCalidad'),
       endosos:             endosos,
       montoContratoInicial: g('f_montoContratoInicial'),
-      montoModificacion:    g('f_montoModificacion'),
+      montoModificacion:    mM > 0 ? String(mM) : '',
+      modificaciones:       modificaciones,
+      plazo:                plazoFinal,
       avanceFisico:         g('f_avanceFisico'),
       avanceFinanciero:     String(avFin),
       pagos:                pagos,
@@ -1667,7 +1783,9 @@ function saveProject() {
       nFianzaCalidad:      g('f_nFianzaCalidad'),      iniFCal: g('f_iniFCal'), finFCal: g('f_finFCal'), montoFianzaCalidad:      g('f_montoFianzaCalidad'),
       endosos:             endosos,
       montoContratoInicial: g('f_montoContratoInicial'),
-      montoModificacion:    g('f_montoModificacion'),
+      montoModificacion:    mM > 0 ? String(mM) : '',
+      modificaciones:       modificaciones,
+      plazo:                plazoFinal,
       avanceFisico:         g('f_avanceFisico'),
       avanceFinanciero:     String(avFin),
       pagos:                pagos,
@@ -1738,7 +1856,7 @@ function deleteProject(u, i) {
 function closeModal(e) {
   if (e && e.target !== document.getElementById('modalOverlay')) return;
   document.getElementById('modalOverlay').classList.remove('open');
-  editingId = null; endosoCount = 0; pagoCount = 0;
+  editingId = null; endosoCount = 0; pagoCount = 0; modCount = 0;
 }
 function closeDetail(e) {
   if (e && e.target !== document.getElementById('detailOverlay')) return;
