@@ -369,7 +369,7 @@ function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
       '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SITU-2025-001"/></div>' +
       '<div class="form-group"><label>Estado del Proyecto <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
       '<div class="form-group"><label>Año del Proyecto <span class="req">*</span></label><select id="f_anioProyecto">' +
-        (function(){ var y=new Date().getFullYear(); var s='<option value="">— Seleccione —</option>'; for(var i=y;i>=y-8;i--) s+='<option value="'+i+'"'+(fv('anioProyecto')===String(i)?' selected':'')+'>'+i+'</option>'; return s; })() +
+        (function(){ var y=new Date().getFullYear(); var s='<option value="">— Seleccione —</option>'; for(var i=y;i>=2024;i--) s+='<option value="'+i+'"'+(fv('anioProyecto')===String(i)?' selected':'')+'>'+i+'</option>'; return s; })() +
       '</select></div>' +
       '<div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Descripción completa del proyecto"/></div>' +
       '<div class="form-group span2"><label>Descripción / Alcance <span class="req">*</span></label><textarea id="f_descripcion" rows="2">'+fv('descripcion')+'</textarea></div>' +
@@ -509,7 +509,7 @@ function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
       '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SUP-SITU-2025-001"/></div>' +
       '<div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
       '<div class="form-group"><label>Año del Proyecto <span class="req">*</span></label><select id="f_anioProyecto">' +
-        (function(){ var y=new Date().getFullYear(); var s='<option value="">— Seleccione —</option>'; for(var i=y;i>=y-8;i--) s+='<option value="'+i+'"'+(fv('anioProyecto')===String(i)?' selected':'')+'>'+i+'</option>'; return s; })() +
+        (function(){ var y=new Date().getFullYear(); var s='<option value="">— Seleccione —</option>'; for(var i=y;i>=2024;i--) s+='<option value="'+i+'"'+(fv('anioProyecto')===String(i)?' selected':'')+'>'+i+'</option>'; return s; })() +
       '</select></div>' +
       '<div class="form-group span2"><label>Nombre / Descripción del Contrato <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Ej. Supervisión de obras de pavimentación CA-5 Norte"/></div>' +
       '<div class="form-group span2"><label>Alcance de la Supervisión <span class="req">*</span></label><textarea id="f_descripcion" rows="2" placeholder="Describa el alcance y objetivo de este contrato de supervisión">'+fv('descripcion')+'</textarea></div>' +
@@ -2383,7 +2383,7 @@ function abrirOpcionesReporte() {
       (function(){
         var y = new Date().getFullYear();
         var s = '<button class="reporte-chip selected" data-anio="'+y+'" onclick="_selAnio(this)">'+y+' (actual)</button>';
-        for(var i=y-1; i>=y-6; i--)
+        for(var i=y-1; i>=2024; i--)
           s += '<button class="reporte-chip" data-anio="'+i+'" onclick="_selAnio(this)">'+i+'</button>';
         return s;
       })() +
