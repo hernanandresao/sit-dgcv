@@ -1472,9 +1472,8 @@ function _onModTipoChange(sel) {
   var isOC = sel.value === 'Orden de Cambio';
   var tag  = card.querySelector('.mod-tag');
   if (tag) {
-    tag.style.background = isOC ? 'var(--amarillo-l)' : 'var(--az7)';
-    tag.style.color      = isOC ? 'var(--amarillo)'   : 'var(--az2)';
-    tag.textContent      = sel.value + ' N° ' + n;
+    tag.className = 'mod-tag ' + (isOC ? 'mod-tag-oc' : 'mod-tag-mod');
+    tag.textContent = sel.value + ' N° ' + n;
   }
 }
 
@@ -1494,8 +1493,8 @@ function addModificacion(data) {
   }).join('');
 
   div.innerHTML =
-    '<div class="mod-tag" id="mod-tag-' + n + '" style="background:' + (isOC ? 'var(--amarillo-l)' : 'var(--az7)') + ';color:' + (isOC ? 'var(--amarillo)' : 'var(--az2)') + ';">' + (data.tipo || 'Modificación') + ' N° ' + n + '</div>' +
-    '<button class="mod-remove" onclick="document.getElementById(\'mod-' + n + '\').remove();syncMontoModificacion();recalcPagos()">✕</button>' +
+    '<div class="mod-tag ' + (isOC ? 'mod-tag-oc' : 'mod-tag-mod') + '" id="mod-tag-' + n + '">' + (data.tipo || 'Modificación') + ' N° ' + n + '</div>' +
+    '<button class="mod-remove" title="Eliminar" onclick="document.getElementById(\'mod-' + n + '\').remove();syncMontoModificacion();recalcPagos()">✕</button>' +
     '<div class="form-grid g3" style="margin-bottom:0">' +
       '<div class="form-group"><label>Tipo <span class="req">*</span></label>' +
         '<select class="mod-tipo" data-n="' + n + '" onchange="_onModTipoChange(this)">' + tipoOpts + '</select></div>' +
@@ -2322,238 +2321,486 @@ document.addEventListener('keydown', function(e) {
 
 
 // ═══════════════════════════════════════════════════════════
-//  REPORTE GENERAL — genera y descarga HTML con gráficas
+// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  REPORTE — Modal de opciones
 // ═══════════════════════════════════════════════════════════
 function generarReporte() {
-  var fecha = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
-  var allP  = Object.values(DB).flat();
-  var total = allP.length;
-  var ejec  = allP.filter(function(p){return p.estado==='En Ejecución';}).length;
-  var proc  = allP.filter(function(p){return p.estado==='En Proceso / Contratación';}).length;
-  var susp  = allP.filter(function(p){return p.estado==='Suspendido';}).length;
-  var term  = allP.filter(function(p){return p.estado==='Terminado';}).length;
-  var avgFis= total ? (allP.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/total).toFixed(1) : 0;
-  var totalMonto   = allP.reduce(function(a,p){var mI=parseFloat(p.montoContratoInicial)||0;var mM=parseFloat(p.montoModificacion)||0;return a+(mM>0?mM:mI);},0);
-  var totalDeveng  = allP.reduce(function(a,p){return a+(parseFloat(p.totalDevengado)||0);},0);
-  var avgFin = totalMonto>0 ? (totalDeveng/totalMonto*100).toFixed(1) : 0;
+  // Abrir modal con opciones en lugar de generar directo
+  abrirOpcionesReporte();
+}
 
-  // Per-unit data
-  var unitData = Object.entries(UNIDADES).map(function(e){
-    var k=e[0]; var u=e[1];
-    var pl = DB[k]||[];
-    var af  = pl.length ? (pl.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/pl.length).toFixed(1) : 0;
-    var mon = pl.reduce(function(a,p){var mI=parseFloat(p.montoContratoInicial)||0;var mM=parseFloat(p.montoModificacion)||0;return a+(mM>0?mM:mI);},0);
-    var dev = pl.reduce(function(a,p){return a+(parseFloat(p.totalDevengado)||0);},0);
-    var afin= mon>0?(dev/mon*100).toFixed(1):0;
-    var eN  = pl.filter(function(p){return p.estado==='En Ejecución';}).length;
-    var sN  = pl.filter(function(p){return p.estado==='Suspendido';}).length;
-    var tN  = pl.filter(function(p){return p.estado==='Terminado';}).length;
-    return {key:k,nombre:u.nombre,color:u.color,total:pl.length,af:af,afin:afin,
-            monto:mon,devengado:dev,ejec:eN,susp:sN,term:tN};
+function abrirOpcionesReporte() {
+  // Construir lista de unidades para selección
+  var unidadOpts = Object.entries(UNIDADES).map(function(e) {
+    var k = e[0]; var u = e[1];
+    var count = (DB[k]||[]).length;
+    return '<label class="reporte-unidad-item" id="ru-'+k+'">' +
+      '<input type="checkbox" class="ru-check" value="'+k+'" checked ' +
+        'onchange="_toggleUnidadReporte(this)" style="accent-color:var(--az2)"/>' +
+      '<span style="flex:1">'+u.nombre+'</span>' +
+      '<span style="font-size:10px;font-family:var(--mono);color:var(--gris3)">'+count+'</span>' +
+    '</label>';
+  }).join('');
+
+  document.getElementById('modalTitle').textContent = 'Generar Reporte';
+  document.getElementById('modalBody').innerHTML =
+    // ── Tipo de reporte
+    '<div class="reporte-section-lbl">Cobertura</div>' +
+    '<div class="reporte-selector">' +
+      '<div class="reporte-opt selected" id="ropt-global" onclick="_selReporteOpt(&quot;global&quot;)">' +
+        '<div class="reporte-opt-icon">🌐</div>' +
+        '<div class="reporte-opt-title">Reporte Global</div>' +
+        '<div class="reporte-opt-desc">Todas las unidades del DGCV</div>' +
+      '</div>' +
+      '<div class="reporte-opt" id="ropt-unidad" onclick="_selReporteOpt(&quot;unidad&quot;)">' +
+        '<div class="reporte-opt-icon">📂</div>' +
+        '<div class="reporte-opt-title">Por Unidad</div>' +
+        '<div class="reporte-opt-desc">Seleccione una o varias unidades</div>' +
+      '</div>' +
+    '</div>' +
+
+    // ── Selección de unidades (oculto hasta elegir "Por Unidad")
+    '<div id="reporte-unidades" style="display:none;margin-bottom:14px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+        '<span style="font-size:11px;color:var(--gris3)">Seleccione unidades a incluir:</span>' +
+        '<button onclick="_toggleTodasUnidades()" style="font-size:10px;color:var(--az2);background:none;border:none;cursor:pointer;font-family:var(--font);">Seleccionar todas</button>' +
+      '</div>' +
+      '<div class="reporte-unidad-grid">'+unidadOpts+'</div>' +
+    '</div>' +
+
+    // ── Período
+    '<div class="reporte-section-lbl">Período</div>' +
+    '<div class="reporte-chips">' +
+      '<button class="reporte-chip selected" data-periodo="anual" onclick="_selPeriodo(this)">Anual</button>' +
+      '<button class="reporte-chip" data-periodo="q1" onclick="_selPeriodo(this)">Q1 Ene–Mar</button>' +
+      '<button class="reporte-chip" data-periodo="q2" onclick="_selPeriodo(this)">Q2 Abr–Jun</button>' +
+      '<button class="reporte-chip" data-periodo="q3" onclick="_selPeriodo(this)">Q3 Jul–Sep</button>' +
+      '<button class="reporte-chip" data-periodo="q4" onclick="_selPeriodo(this)">Q4 Oct–Dic</button>' +
+    '</div>' +
+
+    // ── Tipo de análisis
+    '<div class="reporte-section-lbl" style="margin-top:14px;">Tipo de análisis</div>' +
+    '<div class="reporte-chips">' +
+      '<button class="reporte-chip selected" data-analisis="estado" onclick="_selAnalisis(this)">Estado actual</button>' +
+      '<button class="reporte-chip" data-analisis="proyeccion" onclick="_selAnalisis(this)">Proyección trimestral</button>' +
+    '</div>' +
+
+    // ── Info proyección
+    '<div id="reporte-proyeccion-info" style="display:none;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:10px 12px;margin-top:12px;font-size:11px;color:var(--az2);line-height:1.6;">' +
+      '<strong>Proyección trimestral:</strong> Basada en la tasa de avance actual de cada proyecto, ' +
+      'estima el avance físico y financiero esperado al cierre del siguiente trimestre, ' +
+      'e identifica proyectos en riesgo de no completarse en plazo.' +
+    '</div>';
+
+  // Cambiar botón de guardar
+  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+  if (btnGuardar) {
+    btnGuardar.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M11 2L5 10l-3-3" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg> Generar Reporte';
+    btnGuardar.onclick = _ejecutarReporte;
+    btnGuardar.style.display = '';
+  }
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function _selReporteOpt(tipo) {
+  document.getElementById('ropt-global').classList.toggle('selected', tipo==='global');
+  document.getElementById('ropt-unidad').classList.toggle('selected', tipo==='unidad');
+  document.getElementById('reporte-unidades').style.display = tipo==='unidad' ? 'block' : 'none';
+}
+
+function _selPeriodo(btn) {
+  document.querySelectorAll('[data-periodo]').forEach(function(b){ b.classList.remove('selected'); });
+  btn.classList.add('selected');
+}
+
+function _selAnalisis(btn) {
+  document.querySelectorAll('[data-analisis]').forEach(function(b){ b.classList.remove('selected'); });
+  btn.classList.add('selected');
+  var info = document.getElementById('reporte-proyeccion-info');
+  if (info) info.style.display = btn.getAttribute('data-analisis')==='proyeccion' ? 'block' : 'none';
+}
+
+function _toggleUnidadReporte(chk) {
+  var item = chk.closest('.reporte-unidad-item');
+  if (item) item.classList.toggle('selected', chk.checked);
+}
+
+function _toggleTodasUnidades() {
+  var checks = document.querySelectorAll('.ru-check');
+  var allChecked = Array.from(checks).every(function(c){ return c.checked; });
+  checks.forEach(function(c){
+    c.checked = !allChecked;
+    var item = c.closest('.reporte-unidad-item');
+    if (item) item.classList.toggle('selected', !allChecked);
   });
+}
 
-  function fmtL(n){return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function _ejecutarReporte() {
+  // Leer opciones
+  var esGlobal  = document.getElementById('ropt-global').classList.contains('selected');
+  var periodBtn = document.querySelector('[data-periodo].selected');
+  var periodo   = periodBtn ? periodBtn.getAttribute('data-periodo') : 'anual';
+  var analBtn   = document.querySelector('[data-analisis].selected');
+  var analisis  = analBtn ? analBtn.getAttribute('data-analisis') : 'estado';
 
-  // Build SVG donut pie charts per unit (outer ring=físico, inner ring=financiero)
-  function makePie(pct, color, r, cx, cy) {
-    var p = Math.min(Math.max(parseFloat(pct)||0,0),100);
-    var circ = 2*Math.PI*r;
-    var dash = (p/100)*circ;
-    var gap  = circ-dash;
-    return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="#e8ecf0" stroke-width="14"/>'
-      +'<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+color+'" stroke-width="14"'
-      +' stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'"'
-      +' stroke-linecap="butt" transform="rotate(-90 '+cx+' '+cy+')" />';
-  }
-  var piecharts = unitData.map(function(u){
-    var cx=55,cy=55;
-    var label = u.nombre
-      .replace('Red Vial No Pavimentada','RV No Pavim.')
-      .replace('Red Vial Pavimentada','RV Pavimentada')
-      .replace('Respuesta Rápida a Emergencias','Resp. Rápida')
-      .replace('Fondos Externos/Nacionales','Fondos Ext/Nac')
-      .replace('Fondos BCIE','Fondos BCIE')
-      .replace('Limpieza de Derecho de Vía','Limp. D. de Vía');
-    return '<div style="text-align:center;width:150px;">'
-      +'<svg width="110" height="110" viewBox="0 0 110 110">'
-      + makePie(u.af,  '#1268C4', 42, cx, cy)
-      + makePie(u.afin,'#0D7A4E', 26, cx, cy)
-      +'<text x="'+cx+'" y="'+(cy-5)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#1268C4" font-family="monospace">'+u.af+'%</text>'
-      +'<text x="'+cx+'" y="'+(cy+10)+'" text-anchor="middle" font-size="10" fill="#0D7A4E" font-family="monospace">'+u.afin+'%</text>'
-      +'</svg>'
-      +'<div style="font-size:10px;color:#333;font-weight:600;margin-top:2px;line-height:1.4;">'+label+'</div>'
-      +'<div style="font-size:9px;color:#888;margin-top:1px;">'+u.total+' proy.</div>'
-      +'</div>';
-  }).join('');
+  // Unidades seleccionadas
+  var unidades = esGlobal
+    ? Object.keys(UNIDADES)
+    : Array.from(document.querySelectorAll('.ru-check:checked')).map(function(c){ return c.value; });
 
-  // Estado pie visual (simple bar)
-  var estadoRows = [
-    {label:'En Ejecución',val:ejec,color:'#0D7A4E'},
-    {label:'En Proceso',val:proc,color:'#1268C4'},
-    {label:'Suspendido',val:susp,color:'#B8620A'},
-    {label:'Terminado',val:term,color:'#7B8FA0'},
-  ].map(function(e){
-    var pct = total>0?(e.val/total*100).toFixed(1):0;
-    return '<tr><td style="padding:5px 8px;font-size:12px;">'+e.label+'</td>'
-      +'<td style="padding:5px 8px;"><div style="height:14px;background:#eee;border-radius:3px;overflow:hidden;width:200px;">'
-      +'<div style="height:100%;width:'+pct+'%;background:'+e.color+';border-radius:3px;"></div></div></td>'
-      +'<td style="padding:5px 12px;font-size:12px;font-weight:600;">'+e.val+'</td>'
-      +'<td style="padding:5px 8px;font-size:11px;color:#666;">'+pct+'%</td>'
-      +'</tr>';
-  }).join('');
+  if (!unidades.length) { showToast('Seleccione al menos una unidad.', 'err'); return; }
 
-  // Unit summary table rows
-  var unitRows = unitData.map(function(u){
-    return '<tr>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:500;color:'+u.color+';">'+u.nombre+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.total+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.ejec+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.susp+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.term+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'
-        +'<div style="display:flex;align-items:center;gap:6px;">'
-        +'<div style="flex:1;height:8px;background:#eee;border-radius:4px;overflow:hidden;">'
-        +'<div style="height:100%;width:'+u.af+'%;background:#1268C4;border-radius:4px;"></div></div>'
-        +'<span style="font-size:11px;font-weight:600;color:#1268C4;width:36px;">'+u.af+'%</span></div></td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'
-        +'<div style="display:flex;align-items:center;gap:6px;">'
-        +'<div style="flex:1;height:8px;background:#eee;border-radius:4px;overflow:hidden;">'
-        +'<div style="height:100%;width:'+u.afin+'%;background:#0D7A4E;border-radius:4px;"></div></div>'
-        +'<span style="font-size:11px;font-weight:600;color:#0D7A4E;width:36px;">'+u.afin+'%</span></div></td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(u.monto)+'</td>'
-      +'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(u.devengado)+'</td>'
-      +'</tr>';
-  }).join('');
+  closeModal();
+  // Restaurar el onclick original del botón
+  setTimeout(function() {
+    var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+    if (btnGuardar) btnGuardar.onclick = saveProject;
+  }, 100);
 
-  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>'
-    +'<title>Reporte DGCV — '+fecha+'</title>'
-    +'<style>'
-    +'*{box-sizing:border-box;margin:0;padding:0;}'
-    +'body{font-family:"Segoe UI",Arial,sans-serif;background:#f5f7fa;color:#1C2B3A;font-size:13px;}'
-    +'.page{max-width:1100px;margin:0 auto;padding:24px;}'
-    +'.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:28px 32px;border-radius:10px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #D4A820;}'
-    +'.header h1{font-size:20px;font-weight:700;letter-spacing:.3px;}'
-    +'.header p{font-size:11px;opacity:.7;margin-top:4px;}'
-    +'.header .fecha{text-align:right;font-size:11px;opacity:.7;}'
-    +'.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px;}'
-    +'.kpi{background:#fff;border-radius:8px;padding:16px;border:1px solid #D0DCE6;border-top:3px solid #1268C4;}'
-    +'.kpi.g{border-top-color:#0D7A4E;}.kpi.a{border-top-color:#D4A820;}.kpi.r{border-top-color:#C0392B;}.kpi.gr{border-top-color:#7B8FA0;}'
-    +'.kpi-num{font-size:28px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'
-    +'.kpi-lbl{font-size:11px;color:#7B8FA0;margin-top:5px;font-weight:500;}'
-    +'.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:20px;overflow:hidden;}'
-    +'.section-title{background:#f8f9fb;padding:12px 18px;font-size:12px;font-weight:600;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;}'
-    +'.section-title::before{content:"";display:inline-block;width:3px;height:16px;background:#D4A820;border-radius:2px;}'
-    +'.section-body{padding:18px;}'
-    +'.chart-container{display:flex;gap:8px;align-items:flex-end;padding:10px 0;}'
-    +'.legend{display:flex;gap:16px;margin-top:12px;justify-content:center;}'
-    +'.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#666;}'
-    +'.legend-dot{width:10px;height:10px;border-radius:2px;}'
-    +'table{width:100%;border-collapse:collapse;}'
-    +'th{background:#f0f4f8;padding:9px 12px;text-align:left;font-size:10px;font-weight:600;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;}'
-    +'.footer{text-align:center;font-size:10px;color:#aaa;margin-top:24px;padding:12px;border-top:1px solid #eee;}'
-    +'@media print{'+'*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}'+'body{background:#fff;font-size:11px;}'+'@page{margin:12mm 10mm;size:A4;}'+'button{display:none;}'+'body{background:#fff!important;}'+'}'
-    +'</style></head><body><div class="page">'
-
-    // Header
-    +'<div class="header">'
-    +'<div><h1>Reporte General de Avance — DGCV</h1><p>Dirección General de Conservación Vial · Secretaría de Infraestructura y Transporte</p></div>'
-    +'<div class="fecha">Generado el<br><strong>'+fecha+'</strong></div>'
-    +'</div>'
-
-    // KPIs
-    +'<div class="kpi-grid">'
-    +'<div class="kpi"><div class="kpi-num">'+total+'</div><div class="kpi-lbl">Total Proyectos</div></div>'
-    +'<div class="kpi g"><div class="kpi-num">'+ejec+'</div><div class="kpi-lbl">En Ejecución</div></div>'
-    +'<div class="kpi a"><div class="kpi-num">'+avgFis+'%</div><div class="kpi-lbl">Avance Físico Prom.</div></div>'
-    +'<div class="kpi g"><div class="kpi-num">'+avgFin+'%</div><div class="kpi-lbl">Avance Financiero Prom.</div></div>'
-    +'<div class="kpi r"><div class="kpi-num">'+susp+'</div><div class="kpi-lbl">Suspendidos</div></div>'
-    +'</div>'
-
-    // Gráfica pastel avance por unidad
-    +'<div class="section"><div class="section-title">Avance por Unidad</div><div class="section-body">'
-    +'<div style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center;padding:10px 0;">'+piecharts+'</div>'
-    +'<div class="legend"><div class="legend-item"><div class="legend-dot" style="background:#1268C4"></div>Avance Físico</div>'
-    +'<div class="legend-item"><div class="legend-dot" style="background:#0D7A4E"></div>Avance Financiero</div>'
-    +'<div class="legend-item"><div class="legend-dot" style="background:#e0e0e0"></div>Pendiente</div></div>'
-    +'</div></div>'
-
-    // Estado de proyectos
-    +'<div class="section"><div class="section-title">Distribución por Estado</div><div class="section-body">'
-    +'<table><thead><tr><th>Estado</th><th>Distribución</th><th>Cantidad</th><th>Porcentaje</th></tr></thead>'
-    +'<tbody>'+estadoRows+'</tbody></table>'
-    +'</div></div>'
-
-    // Resumen por unidad
-    +'<div class="section"><div class="section-title">Resumen por Unidad</div><div class="section-body">'
-    +'<table><thead><tr>'
-    +'<th>Unidad</th><th>Proyectos</th><th>En Ejec.</th><th>Susp.</th><th>Term.</th>'
-    +'<th>Av. Físico</th><th>Av. Financiero</th><th>Monto Contrato</th><th>Total Devengado</th>'
-    +'</tr></thead><tbody>'+unitRows+'</tbody></table>'
-    +'</div></div>'
-
-    // Monto total
-    +'<div class="section"><div class="section-title">Resumen Financiero General</div><div class="section-body">'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">'
-    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
-    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Monto Total de Contratos</div>'
-    +'<div style="font-size:18px;font-weight:600;color:#001233;font-family:monospace;">L '+fmtL(totalMonto)+'</div></div>'
-    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
-    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Total Devengado</div>'
-    +'<div style="font-size:18px;font-weight:600;color:#0D7A4E;font-family:monospace;">L '+fmtL(totalDeveng)+'</div></div>'
-    +'<div style="text-align:center;padding:16px;background:#f0f4f8;border-radius:8px;">'
-    +'<div style="font-size:11px;color:#7B8FA0;margin-bottom:4px;">Saldo Pendiente</div>'
-    +'<div style="font-size:18px;font-weight:600;color:#C0392B;font-family:monospace;">L '+fmtL(totalMonto-totalDeveng)+'</div></div>'
-    +'</div></div></div>'
-
-    +'<div class="footer">Reporte generado por el Sistema de Seguimiento DGCV · '+fecha+' · Secretaría de Infraestructura y Transporte · República de Honduras</div>'
-    +'</div></body></html>';
-
-  // Generar PDF directamente usando html2pdf.js
-  var nombreArchivo = 'Reporte_DGCV_' + new Date().toISOString().slice(0,10) + '.pdf';
-  showToast('Generando PDF, espere un momento...', 'ok');
-
-  function ejecutarHtml2Pdf() {
-    var contenedor = document.createElement('div');
-    contenedor.innerHTML = html;
-    contenedor.style.position = 'absolute';
-    contenedor.style.left = '-9999px';
-    contenedor.style.top = '0';
-    document.body.appendChild(contenedor);
-
-    var opt = {
-      margin:       [8, 8, 8, 8],
-      filename:     nombreArchivo,
-      image:        { type: 'jpeg', quality: 0.97 },
-      html2canvas:  { scale: 2, useCORS: true, logging: false },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' },
-      pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] }
-    };
-
-    html2pdf().set(opt).from(contenedor.querySelector('.page') || contenedor).save()
-      .then(function() {
-        document.body.removeChild(contenedor);
-        showToast('✓ PDF descargado: ' + nombreArchivo, 'ok');
-      })
-      .catch(function(e) {
-        document.body.removeChild(contenedor);
-        showToast('Error al generar PDF: ' + e.message, 'err');
-      });
-  }
-
-  // Cargar html2pdf.js si no está disponible
-  if (typeof html2pdf === 'undefined') {
-    var script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.onload = ejecutarHtml2Pdf;
-    script.onerror = function() {
-      showToast('No se pudo cargar la librería de PDF. Verifique su conexión.', 'err');
-    };
-    document.head.appendChild(script);
+  if (analisis === 'proyeccion') {
+    _generarReporteProyeccion(unidades, periodo);
   } else {
-    ejecutarHtml2Pdf();
+    _generarReporteEstado(unidades, periodo, esGlobal);
   }
 }
 
+// ── REPORTE DE ESTADO ACTUAL ─────────────────────────────────────────────────
+function _generarReporteEstado(unidades, periodo, esGlobal) {
+  var fecha   = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
+  var periodoLabel = { anual:'Anual', q1:'Q1 Ene–Mar', q2:'Q2 Abr–Jun', q3:'Q3 Jul–Sep', q4:'Q4 Oct–Dic' };
+  var titulo  = esGlobal ? 'Reporte General de Avance — DGCV' : 'Reporte por Unidad — DGCV';
+  var subtitulo = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · Período: ' + (periodoLabel[periodo]||periodo);
+
+  // Filtrar proyectos por unidades y período
+  function filtroPeriodo(p) {
+    if (periodo === 'anual') return true;
+    var Q = { q1:[1,3], q2:[4,6], q3:[7,9], q4:[10,12] }[periodo];
+    var ref = p.fechaInicio || p.fechaAdjudicacion;
+    if (!ref) return true;
+    var m = new Date(ref).getMonth() + 1;
+    return m >= Q[0] && m <= Q[1];
+  }
+
+  var allP = [];
+  var unitData = [];
+  unidades.forEach(function(k) {
+    var pl = (DB[k]||[]).filter(filtroPeriodo);
+    allP = allP.concat(pl);
+    if (!UNIDADES[k]) return;
+    var u = UNIDADES[k];
+    var mon  = pl.reduce(function(a,p){ var mI=parseFloat(p.montoContratoInicial)||0; var mM=parseFloat(p.montoModificacion)||0; return a+(mM>0?mM:mI); },0);
+    var dev  = pl.reduce(function(a,p){ return a+(parseFloat(p.totalDevengado)||0); },0);
+    var af   = pl.length ? (pl.reduce(function(a,p){ return a+(parseFloat(p.avanceFisico)||0); },0)/pl.length).toFixed(1) : 0;
+    var afin = mon>0?(dev/mon*100).toFixed(1):0;
+    unitData.push({
+      key:k, nombre:u.nombre, color:u.color,
+      total:pl.length,
+      ejec:pl.filter(function(p){return p.estado==='En Ejecución';}).length,
+      susp:pl.filter(function(p){return p.estado==='Suspendido';}).length,
+      term:pl.filter(function(p){return p.estado==='Terminado';}).length,
+      af:af, afin:afin, monto:mon, devengado:dev
+    });
+  });
+
+  var total     = allP.length;
+  var ejec      = allP.filter(function(p){return p.estado==='En Ejecución';}).length;
+  var susp      = allP.filter(function(p){return p.estado==='Suspendido';}).length;
+  var term      = allP.filter(function(p){return p.estado==='Terminado';}).length;
+  var proc      = allP.filter(function(p){return p.estado==='En Proceso / Contratación';}).length;
+  var avgFis    = total ? (allP.reduce(function(a,p){return a+(parseFloat(p.avanceFisico)||0);},0)/total).toFixed(1) : 0;
+  var totalMonto  = allP.reduce(function(a,p){ var mI=parseFloat(p.montoContratoInicial)||0; var mM=parseFloat(p.montoModificacion)||0; return a+(mM>0?mM:mI); },0);
+  var totalDeveng = allP.reduce(function(a,p){ return a+(parseFloat(p.totalDevengado)||0); },0);
+  var avgFin    = totalMonto>0?(totalDeveng/totalMonto*100).toFixed(1):0;
+
+  function fmtL(n){ return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+  // Tabla de proyectos individuales (solo si es por unidad o pocas unidades)
+  var tablaProyectos = '';
+  if (!esGlobal || unidades.length <= 2) {
+    var rows = allP.map(function(p) {
+      var mI=parseFloat(p.montoContratoInicial)||0; var mM=parseFloat(p.montoModificacion)||0;
+      var vig=mM>0?mM:mI;
+      var sc={'En Ejecución':'#0D7A4E','En Proceso / Contratación':'#1268C4','Suspendido':'#B8620A','Terminado':'#7B8FA0'};
+      var tipo = p.tipoProyecto==='supervision'?'Sup.':'Constr.';
+      var noContr = p.tipoProyecto==='supervision'?(p.noContratoSup||'—'):(p.noContrato||'—');
+      return '<tr>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:monospace;">'+noContr+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;max-width:200px;">'+p.proyecto.slice(0,60)+(p.proyecto.length>60?'…':'')+'</td>'+
+        '<td style="padding:6px 10px;font-size:10px;">'+tipo+'</td>'+
+        '<td style="padding:6px 10px;font-size:10px;color:'+p.departamento?'#333':'#aaa'+';">'+( p.departamento||'—')+'</td>'+
+        '<td style="padding:6px 10px;text-align:center;"><span style="background:'+(sc[p.estado]||'#aaa')+'22;color:'+(sc[p.estado]||'#aaa')+';font-size:9px;padding:2px 7px;border-radius:8px;font-weight:600;">'+( p.estado||'—')+'</span></td>'+
+        '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;color:#1268C4;">'+(parseFloat(p.avanceFisico)||0).toFixed(1)+'%</td>'+
+        '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(vig)+'</td>'+
+        '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-size:11px;color:#0D7A4E;">L '+fmtL(parseFloat(p.totalDevengado)||0)+'</td>'+
+      '</tr>';
+    }).join('');
+    tablaProyectos =
+      '<div class="section"><div class="section-title">Detalle de Proyectos ('+allP.length+')</div><div class="section-body" style="padding:0;overflow-x:auto;">'+
+      '<table><thead><tr>'+
+        '<th>N° Contrato</th><th>Proyecto</th><th>Tipo</th><th>Depto.</th><th>Estado</th>'+
+        '<th style="text-align:right">Av. Físico</th><th style="text-align:right">Monto Vigente</th><th style="text-align:right">Devengado</th>'+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+  }
+
+  // Resumen por unidad
+  var unitRows = unitData.map(function(u){
+    return '<tr>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:500;color:'+u.color+';">'+u.nombre+'</td>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.total+'</td>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;color:#0D7A4E;font-weight:600;">'+u.ejec+'</td>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;color:#B8620A;">'+u.susp+'</td>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;">'+u.term+'</td>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;"><span style="font-weight:700;color:#1268C4;">'+u.af+'%</span></td>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center;"><span style="font-weight:700;color:#0D7A4E;">'+u.afin+'%</span></td>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(u.monto)+'</td>'+
+      '<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-family:monospace;font-size:11px;color:#0D7A4E;">L '+fmtL(u.devengado)+'</td>'+
+    '</tr>';
+  }).join('');
+
+  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>'+
+    '<title>'+titulo+' — '+fecha+'</title>'+
+    '<style>'+
+    '*{box-sizing:border-box;margin:0;padding:0;}'+
+    'body{font-family:"Segoe UI",Arial,sans-serif;background:#f5f7fa;color:#1C2B3A;font-size:13px;}'+
+    '.page{max-width:1100px;margin:0 auto;padding:24px;}'+
+    '.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:24px 32px;border-radius:10px;margin-bottom:20px;border-bottom:3px solid #D4A820;display:flex;justify-content:space-between;align-items:flex-start;}'+
+    '.header h1{font-size:18px;font-weight:700;}'+
+    '.header p{font-size:11px;opacity:.7;margin-top:4px;}'+
+    '.header .badge{background:rgba(212,168,32,.25);color:#F0C040;font-size:10px;font-weight:600;padding:3px 10px;border-radius:10px;margin-top:6px;display:inline-block;}'+
+    '.header .fecha{text-align:right;font-size:11px;opacity:.7;}'+
+    '.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px;}'+
+    '.kpi{background:#fff;border-radius:8px;padding:14px;border:1px solid #D0DCE6;border-top:3px solid #1268C4;}'+
+    '.kpi.g{border-top-color:#0D7A4E;}.kpi.a{border-top-color:#D4A820;}.kpi.r{border-top-color:#C0392B;}.kpi.gr{border-top-color:#7B8FA0;}'+
+    '.kpi-num{font-size:26px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'+
+    '.kpi-lbl{font-size:10px;color:#7B8FA0;margin-top:4px;font-weight:500;}'+
+    '.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:18px;overflow:hidden;}'+
+    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:11px;font-weight:700;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;}'+
+    '.section-title::before{content:"";display:inline-block;width:3px;height:14px;background:#D4A820;border-radius:2px;}'+
+    '.section-body{padding:16px;}'+
+    'table{width:100%;border-collapse:collapse;}'+
+    'th{background:#f0f4f8;padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;white-space:nowrap;}'+
+    'td{border-bottom:1px solid #f0f0f0;}'+
+    'tr:last-child td{border-bottom:none;}'+
+    '.fin-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}'+
+    '.fin-box{text-align:center;padding:14px;background:#f0f4f8;border-radius:8px;}'+
+    '.fin-box-lbl{font-size:10px;color:#7B8FA0;margin-bottom:4px;}'+
+    '.fin-box-val{font-size:16px;font-weight:700;font-family:monospace;}'+
+    '.footer{text-align:center;font-size:10px;color:#aaa;margin-top:20px;padding:10px;border-top:1px solid #eee;}'+
+    '@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}body{background:#fff;}@page{margin:10mm 8mm;size:A4 landscape;}button{display:none;}}'+
+    '</style></head><body><div class="page">'+
+
+    '<div class="header">'+
+    '<div><h1>'+titulo+'</h1><p>'+subtitulo+'</p><span class="badge">'+( periodoLabel[periodo]||periodo)+'</span></div>'+
+    '<div class="fecha">Generado el<br><strong>'+fecha+'</strong></div>'+
+    '</div>'+
+
+    '<div class="kpi-grid">'+
+    '<div class="kpi"><div class="kpi-num">'+total+'</div><div class="kpi-lbl">Total Proyectos</div></div>'+
+    '<div class="kpi g"><div class="kpi-num">'+ejec+'</div><div class="kpi-lbl">En Ejecución</div></div>'+
+    '<div class="kpi a"><div class="kpi-num">'+avgFis+'%</div><div class="kpi-lbl">Av. Físico Prom.</div></div>'+
+    '<div class="kpi g"><div class="kpi-num">'+avgFin+'%</div><div class="kpi-lbl">Av. Financiero Prom.</div></div>'+
+    '<div class="kpi r"><div class="kpi-num">'+susp+'</div><div class="kpi-lbl">Suspendidos</div></div>'+
+    '</div>'+
+
+    (unitData.length > 1 ?
+    '<div class="section"><div class="section-title">Resumen por Unidad</div><div class="section-body" style="padding:0;overflow-x:auto;">'+
+    '<table><thead><tr>'+
+    '<th>Unidad</th><th>Total</th><th>En Ejec.</th><th>Susp.</th><th>Term.</th>'+
+    '<th>Av. Físico</th><th>Av. Financiero</th><th style="text-align:right">Monto Contratos</th><th style="text-align:right">Devengado</th>'+
+    '</tr></thead><tbody>'+unitRows+'</tbody></table></div></div>' : '') +
+
+    tablaProyectos +
+
+    '<div class="section"><div class="section-title">Resumen Financiero</div><div class="section-body">'+
+    '<div class="fin-grid">'+
+    '<div class="fin-box"><div class="fin-box-lbl">Monto Total de Contratos</div><div class="fin-box-val" style="color:#001233;">L '+fmtL(totalMonto)+'</div></div>'+
+    '<div class="fin-box"><div class="fin-box-lbl">Total Devengado</div><div class="fin-box-val" style="color:#0D7A4E;">L '+fmtL(totalDeveng)+'</div></div>'+
+    '<div class="fin-box"><div class="fin-box-lbl">Saldo Pendiente</div><div class="fin-box-val" style="color:#C0392B;">L '+fmtL(totalMonto-totalDeveng)+'</div></div>'+
+    '</div></div></div>'+
+
+    '<div class="footer">SIT-DGCV · '+fecha+' · Secretaría de Infraestructura y Transporte · República de Honduras</div>'+
+    '</div></body></html>';
+
+  _abrirVentanaReporte(html, 'Reporte_DGCV_'+periodo+'_'+new Date().toISOString().slice(0,10));
+}
+
+// ── REPORTE DE PROYECCIÓN TRIMESTRAL ─────────────────────────────────────────
+function _generarReporteProyeccion(unidades, periodo) {
+  var fecha = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
+  var hoy   = new Date();
+
+  // Determinar trimestre objetivo
+  var Q_TARGET = {
+    anual: { label: 'Fin de Año', meses: 12 },
+    q1: { label: 'Cierre Q1 (Mar)', meses: 3 },
+    q2: { label: 'Cierre Q2 (Jun)', meses: 6 },
+    q3: { label: 'Cierre Q3 (Sep)', meses: 9 },
+    q4: { label: 'Cierre Q4 (Dic)', meses: 12 }
+  }[periodo] || { label: 'Anual', meses: 12 };
+
+  var fechaMeta = new Date(hoy.getFullYear(), Q_TARGET.meses - 1, 30);
+  var diasAlMeta = Math.max(1, Math.round((fechaMeta - hoy) / (1000*60*60*24)));
+
+  var allP = [];
+  unidades.forEach(function(k) { allP = allP.concat(DB[k]||[]); });
+
+  // Filtrar solo proyectos activos (En Ejecución o En Proceso)
+  var activos = allP.filter(function(p) {
+    return p.estado === 'En Ejecución' || p.estado === 'En Proceso / Contratación';
+  });
+
+  function proyectarAvance(p) {
+    var avActual = parseFloat(p.avanceFisico) || 0;
+    if (avActual >= 100) return 100;
+
+    var fechaIni = p.fechaInicio ? new Date(p.fechaInicio) : null;
+    var plazo    = parseInt(p.plazo) || 0;
+
+    if (fechaIni && plazo > 0) {
+      var diasTranscurridos = Math.max(1, Math.round((hoy - fechaIni) / (1000*60*60*24)));
+      var tasaDiaria = avActual / diasTranscurridos;
+      var proyectado = avActual + (tasaDiaria * diasAlMeta);
+      return Math.min(100, Math.round(proyectado * 10) / 10);
+    }
+    // Sin fechas: proyección lineal simple basada en avance actual
+    var tasaMensual = avActual / 12;
+    return Math.min(100, Math.round((avActual + tasaMensual * (Q_TARGET.meses - hoy.getMonth())) * 10) / 10);
+  }
+
+  function riesgo(p, proyectado) {
+    if (proyectado >= 100) return { nivel: 'ok', label: 'En tiempo', color: '#0D7A4E' };
+    if (!p.fechaFinObra && !p.plazo) return { nivel: 'sin-datos', label: 'Sin fecha fin', color: '#7B8FA0' };
+    var fechaFin = p.fechaFinObra ? new Date(p.fechaFinObra) :
+      (p.fechaInicio && p.plazo ? new Date(new Date(p.fechaInicio).getTime() + parseInt(p.plazo)*86400000) : null);
+    if (!fechaFin) return { nivel: 'sin-datos', label: 'Sin fecha fin', color: '#7B8FA0' };
+    if (fechaFin <= fechaMeta && proyectado < 100)
+      return { nivel: 'critico', label: 'En riesgo crítico', color: '#C0392B' };
+    if (fechaFin <= new Date(fechaMeta.getTime() + 30*86400000) && proyectado < 80)
+      return { nivel: 'alerta', label: 'Monitorear', color: '#B8620A' };
+    return { nivel: 'ok', label: 'En tiempo', color: '#0D7A4E' };
+  }
+
+  var rows = activos.map(function(p) {
+    var av  = parseFloat(p.avanceFisico) || 0;
+    var proy = proyectarAvance(p);
+    var delta = proy - av;
+    var r   = riesgo(p, proy);
+    var noContr = p.tipoProyecto==='supervision'?(p.noContratoSup||'—'):(p.noContrato||'—');
+    var empresa = p.tipoProyecto==='supervision'?(p.supervisora||'—'):(p.constructora||'—');
+    return '<tr>'+
+      '<td style="padding:6px 10px;font-size:10px;font-family:monospace;white-space:nowrap;">'+noContr+'</td>'+
+      '<td style="padding:6px 10px;font-size:11px;max-width:180px;">'+p.proyecto.slice(0,55)+(p.proyecto.length>55?'…':'')+'</td>'+
+      '<td style="padding:6px 10px;font-size:10px;">'+( p.departamento||'—')+'</td>'+
+      '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-weight:700;color:#1268C4;">'+av.toFixed(1)+'%</td>'+
+      '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-weight:700;color:#002B6B;">'+proy.toFixed(1)+'%</td>'+
+      '<td style="padding:6px 10px;text-align:right;font-family:monospace;color:'+(delta>=0?'#0D7A4E':'#C0392B')+';">'+(delta>=0?'+':'')+delta.toFixed(1)+'%</td>'+
+      '<td style="padding:6px 10px;text-align:center;"><span style="background:'+r.color+'22;color:'+r.color+';font-size:9px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;">'+r.label+'</span></td>'+
+      '<td style="padding:6px 10px;font-size:10px;max-width:140px;">'+empresa.slice(0,35)+'</td>'+
+    '</tr>';
+  }).join('');
+
+  var criticos = activos.filter(function(p){ return riesgo(p,proyectarAvance(p)).nivel==='critico'; }).length;
+  var alertas  = activos.filter(function(p){ return riesgo(p,proyectarAvance(p)).nivel==='alerta'; }).length;
+  var enTiempo = activos.filter(function(p){ return riesgo(p,proyectarAvance(p)).nivel==='ok'; }).length;
+
+  function fmtL(n){ return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>'+
+    '<title>Proyección Trimestral DGCV — '+fecha+'</title>'+
+    '<style>'+
+    '*{box-sizing:border-box;margin:0;padding:0;}'+
+    'body{font-family:"Segoe UI",Arial,sans-serif;background:#f5f7fa;color:#1C2B3A;font-size:13px;}'+
+    '.page{max-width:1200px;margin:0 auto;padding:24px;}'+
+    '.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:24px 32px;border-radius:10px;margin-bottom:20px;border-bottom:3px solid #D4A820;display:flex;justify-content:space-between;align-items:flex-start;}'+
+    '.header h1{font-size:18px;font-weight:700;}.header p{font-size:11px;opacity:.7;margin-top:4px;}'+
+    '.header .badge{background:rgba(212,168,32,.25);color:#F0C040;font-size:10px;font-weight:600;padding:3px 10px;border-radius:10px;margin-top:6px;display:inline-block;}'+
+    '.header .fecha{text-align:right;font-size:11px;opacity:.7;}'+
+    '.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}'+
+    '.kpi{background:#fff;border-radius:8px;padding:14px;border:1px solid #D0DCE6;border-top:3px solid #1268C4;}'+
+    '.kpi.r{border-top-color:#C0392B;}.kpi.a{border-top-color:#B8620A;}.kpi.g{border-top-color:#0D7A4E;}'+
+    '.kpi-num{font-size:26px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'+
+    '.kpi-lbl{font-size:10px;color:#7B8FA0;margin-top:4px;font-weight:500;}'+
+    '.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:18px;overflow:hidden;}'+
+    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:11px;font-weight:700;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;}'+
+    '.section-title::before{content:"";display:inline-block;width:3px;height:14px;background:#D4A820;border-radius:2px;}'+
+    'table{width:100%;border-collapse:collapse;}'+
+    'th{background:#f0f4f8;padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;white-space:nowrap;}'+
+    'td{border-bottom:1px solid #f4f4f4;}tr:last-child td{border-bottom:none;}'+
+    '.nota{background:#EDF5FC;border:1px solid #7DBFF0;border-radius:7px;padding:10px 14px;font-size:11px;color:#002B6B;margin-bottom:16px;line-height:1.6;}'+
+    '.footer{text-align:center;font-size:10px;color:#aaa;margin-top:20px;padding:10px;border-top:1px solid #eee;}'+
+    '@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}body{background:#fff;}@page{margin:10mm 8mm;size:A4 landscape;}button{display:none;}}'+
+    '</style></head><body><div class="page">'+
+
+    '<div class="header">'+
+    '<div><h1>Proyección de Avance Trimestral — DGCV</h1>'+
+    '<p>'+unidades.map(function(k){return UNIDADES[k]?UNIDADES[k].nombre:k;}).join(', ')+'</p>'+
+    '<span class="badge">Meta: '+Q_TARGET.label+' · '+diasAlMeta+' días restantes</span></div>'+
+    '<div class="fecha">Generado el<br><strong>'+fecha+'</strong></div>'+
+    '</div>'+
+
+    '<div class="nota">'+
+    '⚠️ <strong>Metodología:</strong> La proyección se calcula con base en la tasa de avance diaria de cada proyecto '+
+    '(avance actual ÷ días transcurridos desde inicio) multiplicada por los días restantes al cierre del trimestre objetivo. '+
+    'Proyectos sin fecha de inicio usan proyección lineal mensual. Resultado indicativo, no contractual.'+
+    '</div>'+
+
+    '<div class="kpi-grid">'+
+    '<div class="kpi"><div class="kpi-num">'+activos.length+'</div><div class="kpi-lbl">Proyectos Activos</div></div>'+
+    '<div class="kpi r"><div class="kpi-num">'+criticos+'</div><div class="kpi-lbl">En Riesgo Crítico</div></div>'+
+    '<div class="kpi a"><div class="kpi-num">'+alertas+'</div><div class="kpi-lbl">Requieren Monitoreo</div></div>'+
+    '<div class="kpi g"><div class="kpi-num">'+enTiempo+'</div><div class="kpi-lbl">En Tiempo</div></div>'+
+    '</div>'+
+
+    '<div class="section"><div class="section-title">Proyección de Avance al '+Q_TARGET.label+'</div>'+
+    '<div style="overflow-x:auto;"><table><thead><tr>'+
+    '<th>N° Contrato</th><th>Proyecto</th><th>Depto.</th>'+
+    '<th style="text-align:right">Av. Actual</th>'+
+    '<th style="text-align:right">Proyección</th>'+
+    '<th style="text-align:right">Δ Esperado</th>'+
+    '<th style="text-align:center">Estado de Riesgo</th>'+
+    '<th>Empresa</th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
+
+    '<div class="footer">Proyección generada por SIT-DGCV · '+fecha+' · Esta proyección es estimativa y de uso interno</div>'+
+    '</div></body></html>';
+
+  _abrirVentanaReporte(html, 'Proyeccion_'+Q_TARGET.label.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10));
+}
+
+function _abrirVentanaReporte(html, nombre) {
+  showToast('Generando reporte...', 'ok');
+  var nombreArchivo = nombre + '.pdf';
+
+  function ejecutar() {
+    var contenedor = document.createElement('div');
+    contenedor.innerHTML = html;
+    contenedor.style.cssText = 'position:absolute;left:-9999px;top:0;';
+    document.body.appendChild(contenedor);
+    var opt = {
+      margin: [8,8,8,8],
+      filename: nombreArchivo,
+      image: { type:'jpeg', quality:0.97 },
+      html2canvas: { scale:2, useCORS:true, logging:false },
+      jsPDF: { unit:'mm', format:'a4', orientation:'landscape' },
+      pagebreak: { mode:['avoid-all','css','legacy'] }
+    };
+    html2pdf().set(opt).from(contenedor.querySelector('.page')||contenedor).save()
+      .then(function(){ document.body.removeChild(contenedor); showToast('✓ PDF descargado: '+nombreArchivo, 'ok'); })
+      .catch(function(e){ document.body.removeChild(contenedor); showToast('Error al generar PDF: '+e.message,'err'); });
+  }
+
+  if (typeof html2pdf === 'undefined') {
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    script.onload = ejecutar;
+    script.onerror = function(){ showToast('No se pudo cargar la librería PDF.','err'); };
+    document.head.appendChild(script);
+  } else { ejecutar(); }
+}
+
+function generarReporte_OLD() {
+}
 
 // ═══════════════════════════════════════════════════════════
 //  ALERTAS — Navegación al proyecto desde el banner
