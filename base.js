@@ -910,7 +910,7 @@ function renderAlertasBanner(alertas) {
   return '<div class="alerta-banner" id="alerta-banner">'
     +'<div class="alerta-header" onclick="toggleAlertaBanner()">'
     +'<span class="alerta-dot '+dominante+'"></span>'
-    +'<span style="font-size:12px;font-weight:600;color:var(--gris1);">⚠️  Alertas de Garantías / Fianzas</span>'
+    +'<span style="font-size:12px;font-weight:600;color:var(--gris1);">[!]  Alertas de Garantías / Fianzas</span>'
     +headerParts.join(' ')
     +'<span class="alerta-toggle" id="alerta-toggle-icon">▼ ver detalle</span>'
     +'</div>'
@@ -1823,7 +1823,7 @@ function saveProject() {
       saveLocalDB();
       var msg = 'Error al guardar en BD: ' + e.message;
       showToast(msg, 'err');
-      setTimeout(function() { alert('⚠️ ' + msg + '\n\nEl proyecto quedó guardado localmente pero NO en Supabase.\nRevise la conexión.'); }, 500);
+      setTimeout(function() { alert('[!] ' + msg + '\n\nEl proyecto quedó guardado localmente pero NO en Supabase.\nRevise la conexión.'); }, 500);
     });
 }
 
@@ -2349,12 +2349,12 @@ function abrirOpcionesReporte() {
     '<div class="reporte-section-lbl">Cobertura</div>' +
     '<div class="reporte-selector">' +
       '<div class="reporte-opt selected" id="ropt-global" onclick="_selReporteOpt(&quot;global&quot;)">' +
-        '<div class="reporte-opt-icon">🌐</div>' +
+        '<div class="reporte-opt-icon"><svg viewBox="0 0 24 24" fill="none" width="26" height="26"><circle cx="12" cy="12" r="10" stroke="#1268C4" stroke-width="1.8"/><path d="M12 2C12 2 8 7 8 12s4 10 4 10M12 2c0 0 4 5 4 10s-4 10-4 10M2 12h20" stroke="#1268C4" stroke-width="1.6" stroke-linecap="round"/></svg></div>' +
         '<div class="reporte-opt-title">Reporte Global</div>' +
         '<div class="reporte-opt-desc">Todas las unidades del DGCV</div>' +
       '</div>' +
       '<div class="reporte-opt" id="ropt-unidad" onclick="_selReporteOpt(&quot;unidad&quot;)">' +
-        '<div class="reporte-opt-icon">📂</div>' +
+        '<div class="reporte-opt-icon"><svg viewBox="0 0 24 24" fill="none" width="26" height="26"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="#1268C4" stroke-width="1.8"/></svg></div>' +
         '<div class="reporte-opt-title">Por Unidad</div>' +
         '<div class="reporte-opt-desc">Seleccione una o varias unidades</div>' +
       '</div>' +
@@ -2472,14 +2472,56 @@ function _generarReporteEstado(unidades, periodo, esGlobal) {
   var titulo  = esGlobal ? 'Reporte General de Avance — DGCV' : 'Reporte por Unidad — DGCV';
   var subtitulo = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · Período: ' + (periodoLabel[periodo]||periodo);
 
-  // Filtrar proyectos por unidades y período
+  // Filtrar proyectos relevantes para el período:
+  // Incluye proyectos que (a) estaban activos durante el trimestre, o
+  // (b) cerraron/cierran dentro del trimestre seleccionado.
+  var Q_RANGO = periodo === 'anual' ? null : { q1:[1,3], q2:[4,6], q3:[7,9], q4:[10,12] }[periodo];
+  var anioRef  = new Date().getFullYear();
+
   function filtroPeriodo(p) {
-    if (periodo === 'anual') return true;
-    var Q = { q1:[1,3], q2:[4,6], q3:[7,9], q4:[10,12] }[periodo];
-    var ref = p.fechaInicio || p.fechaAdjudicacion;
-    if (!ref) return true;
-    var m = new Date(ref).getMonth() + 1;
-    return m >= Q[0] && m <= Q[1];
+    if (!Q_RANGO) return true; // Anual = todos
+
+    var qIni = Q_RANGO[0]; // mes inicio del trimestre (1-based)
+    var qFin = Q_RANGO[1]; // mes fin del trimestre (1-based)
+
+    // Fecha inicio del proyecto
+    var fIni = p.fechaInicio ? new Date(p.fechaInicio) : null;
+    // Fecha fin del proyecto (programada)
+    var fFin = p.fechaFinObra ? new Date(p.fechaFinObra) :
+               (fIni && p.plazo ? new Date(fIni.getTime() + parseInt(p.plazo)*86400000) : null);
+
+    // Si no hay ninguna fecha → incluir siempre (no excluir por falta de datos)
+    if (!fIni && !fFin) return true;
+
+    var inicioTrimestre = new Date(anioRef, qIni - 1, 1);
+    var finTrimestre    = new Date(anioRef, qFin, 0); // último día del mes qFin
+
+    // Proyecto activo (En Ejecución o En Proceso) → verificar si su ventana
+    // de ejecución se superpone con el trimestre
+    var estaActivo = p.estado === 'En Ejecución' || p.estado === 'En Proceso / Contratación';
+    if (estaActivo) {
+      // Se superpone si inició antes del fin del trimestre
+      // y no terminó antes del inicio del trimestre
+      var inicioAntes = !fIni || fIni <= finTrimestre;
+      var noTerminoAntes = !fFin || fFin >= inicioTrimestre;
+      if (inicioAntes && noTerminoAntes) return true;
+    }
+
+    // Proyecto Terminado o en cualquier estado → verificar si cerró en este trimestre
+    if (fFin) {
+      var mFin = fFin.getMonth() + 1;
+      var aFin = fFin.getFullYear();
+      if (aFin === anioRef && mFin >= qIni && mFin <= qFin) return true;
+    }
+
+    // Proyecto que inicia en este trimestre (por contratación)
+    if (fIni) {
+      var mIni = fIni.getMonth() + 1;
+      var aIni = fIni.getFullYear();
+      if (aIni === anioRef && mIni >= qIni && mIni <= qFin) return true;
+    }
+
+    return false;
   }
 
   var allP = [];
@@ -2630,16 +2672,29 @@ function _generarReporteProyeccion(unidades, periodo) {
   var fecha = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
   var hoy   = new Date();
 
-  // Determinar trimestre objetivo
-  var Q_TARGET = {
-    anual: { label: 'Fin de Año', meses: 12 },
-    q1: { label: 'Cierre Q1 (Mar)', meses: 3 },
-    q2: { label: 'Cierre Q2 (Jun)', meses: 6 },
-    q3: { label: 'Cierre Q3 (Sep)', meses: 9 },
-    q4: { label: 'Cierre Q4 (Dic)', meses: 12 }
-  }[periodo] || { label: 'Anual', meses: 12 };
+  // La proyección siempre apunta al SIGUIENTE trimestre desde hoy
+  var mesActual = hoy.getMonth() + 1; // 1-12
+  var trimestreActual = mesActual <= 3 ? 'q1' : mesActual <= 6 ? 'q2' : mesActual <= 9 ? 'q3' : 'q4';
+  var siguienteQ = { q1:'q2', q2:'q3', q3:'q4', q4:'q1' }[trimestreActual];
+  var anioProyeccion = siguienteQ === 'q1' ? hoy.getFullYear() + 1 : hoy.getFullYear();
 
-  var fechaMeta = new Date(hoy.getFullYear(), Q_TARGET.meses - 1, 30);
+  var Q_LABELS = {
+    q1: 'Cierre Q1 — 31 Mar ' + anioProyeccion,
+    q2: 'Cierre Q2 — 30 Jun ' + anioProyeccion,
+    q3: 'Cierre Q3 — 30 Sep ' + anioProyeccion,
+    q4: 'Cierre Q4 — 31 Dic ' + anioProyeccion
+  };
+  var Q_MESES = { q1:3, q2:6, q3:9, q4:12 };
+
+  var Q_TARGET = {
+    label: Q_LABELS[siguienteQ],
+    meses: Q_MESES[siguienteQ],
+    anio:  anioProyeccion,
+    qLabel: siguienteQ.toUpperCase()
+  };
+
+  // Fecha meta = último día del siguiente trimestre
+  var fechaMeta = new Date(anioProyeccion, Q_TARGET.meses - 1 + 1, 0); // último día del mes
   var diasAlMeta = Math.max(1, Math.round((fechaMeta - hoy) / (1000*60*60*24)));
 
   var allP = [];
@@ -2663,9 +2718,11 @@ function _generarReporteProyeccion(unidades, periodo) {
       var proyectado = avActual + (tasaDiaria * diasAlMeta);
       return Math.min(100, Math.round(proyectado * 10) / 10);
     }
-    // Sin fechas: proyección lineal simple basada en avance actual
-    var tasaMensual = avActual / 12;
-    return Math.min(100, Math.round((avActual + tasaMensual * (Q_TARGET.meses - hoy.getMonth())) * 10) / 10);
+    // Sin fechas de inicio: proyección usando días restantes al meta con tasa mensual estimada
+    var mesesTranscurridos = Math.max(1, hoy.getMonth() + 1); // meses desde inicio de año
+    var tasaMensual = avActual / mesesTranscurridos;
+    var mesesAlMeta = Math.max(1, diasAlMeta / 30.4);
+    return Math.min(100, Math.round((avActual + tasaMensual * mesesAlMeta) * 10) / 10);
   }
 
   function riesgo(p, proyectado) {
@@ -2735,12 +2792,12 @@ function _generarReporteProyeccion(unidades, periodo) {
     '<div class="header">'+
     '<div><h1>Proyección de Avance Trimestral — DGCV</h1>'+
     '<p>'+unidades.map(function(k){return UNIDADES[k]?UNIDADES[k].nombre:k;}).join(', ')+'</p>'+
-    '<span class="badge">Meta: '+Q_TARGET.label+' · '+diasAlMeta+' días restantes</span></div>'+
+    '<span class="badge">Proyección: '+Q_TARGET.label+' ('+diasAlMeta+' días)</span></div>'+
     '<div class="fecha">Generado el<br><strong>'+fecha+'</strong></div>'+
     '</div>'+
 
     '<div class="nota">'+
-    '⚠️ <strong>Metodología:</strong> La proyección se calcula con base en la tasa de avance diaria de cada proyecto '+
+    '<strong>Nota metodológica:</strong> La proyección se calcula con base en la tasa de avance diaria de cada proyecto '+
     '(avance actual ÷ días transcurridos desde inicio) multiplicada por los días restantes al cierre del trimestre objetivo. '+
     'Proyectos sin fecha de inicio usan proyección lineal mensual. Resultado indicativo, no contractual.'+
     '</div>'+
@@ -2752,7 +2809,7 @@ function _generarReporteProyeccion(unidades, periodo) {
     '<div class="kpi g"><div class="kpi-num">'+enTiempo+'</div><div class="kpi-lbl">En Tiempo</div></div>'+
     '</div>'+
 
-    '<div class="section"><div class="section-title">Proyección de Avance al '+Q_TARGET.label+'</div>'+
+    '<div class="section"><div class="section-title">Proyección al '+Q_TARGET.label+' — Proyectos Activos ('+activos.length+')</div>'+
     '<div style="overflow-x:auto;"><table><thead><tr>'+
     '<th>N° Contrato</th><th>Proyecto</th><th>Depto.</th>'+
     '<th style="text-align:right">Av. Actual</th>'+
@@ -2786,7 +2843,7 @@ function _abrirVentanaReporte(html, nombre) {
       pagebreak: { mode:['avoid-all','css','legacy'] }
     };
     html2pdf().set(opt).from(contenedor.querySelector('.page')||contenedor).save()
-      .then(function(){ document.body.removeChild(contenedor); showToast('✓ PDF descargado: '+nombreArchivo, 'ok'); })
+      .then(function(){ document.body.removeChild(contenedor); showToast('[OK] PDF descargado: '+nombreArchivo, 'ok'); })
       .catch(function(e){ document.body.removeChild(contenedor); showToast('Error al generar PDF: '+e.message,'err'); });
   }
 
