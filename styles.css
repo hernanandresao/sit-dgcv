@@ -533,6 +533,32 @@ input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3
 .mod-kpi-num{font-size:18px;font-weight:300;font-family:var(--mono);}
 .mod-kpi-lbl{font-size:9px;opacity:.6;margin-top:1px;}
 
+/* ═══════════ TIPO SELECTOR (modal nuevo proyecto) ═══════════ */
+.tipo-selector{
+  display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px;
+}
+.tipo-card{
+  border:2px solid var(--border);border-radius:10px;padding:20px 16px;
+  cursor:pointer;transition:.18s;background:#fff;
+  display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;
+  position:relative;
+}
+.tipo-card:hover{border-color:var(--az4);background:var(--az7);transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,42,90,.1);}
+.tipo-card-icon{
+  width:56px;height:56px;border-radius:12px;
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:2px;
+}
+.tipo-card-icon svg{width:28px;height:28px;}
+.tipo-card-title{font-size:13px;font-weight:600;color:var(--az1);}
+.tipo-card-desc{font-size:11px;color:var(--gris3);line-height:1.5;}
+.tipo-card-arrow{
+  font-size:18px;color:var(--az3);margin-top:4px;
+  transition:.18s;opacity:.5;
+}
+.tipo-card:hover .tipo-card-arrow{opacity:1;transform:translateX(4px);}
+@media(max-width:600px){.tipo-selector{grid-template-columns:1fr;}}
+
 /* ═══════════ RESPONSIVE ═══════════ */
 
 /* ── Tablet (≤900px) ── */
