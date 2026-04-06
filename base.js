@@ -368,6 +368,9 @@ function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
     '<div class="form-grid g2">' +
       '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SITU-2025-001"/></div>' +
       '<div class="form-group"><label>Estado del Proyecto <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
+      '<div class="form-group"><label>Año del Proyecto <span class="req">*</span></label><select id="f_anioProyecto">' +
+        (function(){ var y=new Date().getFullYear(); var s='<option value="">— Seleccione —</option>'; for(var i=y;i>=y-8;i--) s+='<option value="'+i+'"'+(fv('anioProyecto')===String(i)?' selected':'')+'>'+i+'</option>'; return s; })() +
+      '</select></div>' +
       '<div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Descripción completa del proyecto"/></div>' +
       '<div class="form-group span2"><label>Descripción / Alcance <span class="req">*</span></label><textarea id="f_descripcion" rows="2">'+fv('descripcion')+'</textarea></div>' +
     '</div>' +
@@ -505,6 +508,9 @@ function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
     '<div class="form-grid g2">' +
       '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SUP-SITU-2025-001"/></div>' +
       '<div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
+      '<div class="form-group"><label>Año del Proyecto <span class="req">*</span></label><select id="f_anioProyecto">' +
+        (function(){ var y=new Date().getFullYear(); var s='<option value="">— Seleccione —</option>'; for(var i=y;i>=y-8;i--) s+='<option value="'+i+'"'+(fv('anioProyecto')===String(i)?' selected':'')+'>'+i+'</option>'; return s; })() +
+      '</select></div>' +
       '<div class="form-group span2"><label>Nombre / Descripción del Contrato <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Ej. Supervisión de obras de pavimentación CA-5 Norte"/></div>' +
       '<div class="form-group span2"><label>Alcance de la Supervisión <span class="req">*</span></label><textarea id="f_descripcion" rows="2" placeholder="Describa el alcance y objetivo de este contrato de supervisión">'+fv('descripcion')+'</textarea></div>' +
     '</div>' +
@@ -1655,6 +1661,7 @@ function saveProject() {
     proj = {
       tipoProyecto:        'supervision',
       nProceso:            g('f_nProceso'),
+      anioProyecto:        g('f_anioProyecto'),
       proyecto:            g('f_proyecto'),
       descripcion:         g('f_descripcion'),
       estado:              g('f_estado'),
@@ -1752,6 +1759,7 @@ function saveProject() {
     proj = {
       tipoProyecto:        'construccion',
       nProceso:            g('f_nProceso'),
+      anioProyecto:        g('f_anioProyecto'),
       proyecto:            g('f_proyecto'),
       descripcion:         g('f_descripcion'),
       estado:              g('f_estado'),
@@ -2369,14 +2377,16 @@ function abrirOpcionesReporte() {
       '<div class="reporte-unidad-grid">'+unidadOpts+'</div>' +
     '</div>' +
 
-    // ── Período
-    '<div class="reporte-section-lbl">Período</div>' +
-    '<div class="reporte-chips">' +
-      '<button class="reporte-chip selected" data-periodo="anual" onclick="_selPeriodo(this)">Anual</button>' +
-      '<button class="reporte-chip" data-periodo="q1" onclick="_selPeriodo(this)">Q1 Ene–Mar</button>' +
-      '<button class="reporte-chip" data-periodo="q2" onclick="_selPeriodo(this)">Q2 Abr–Jun</button>' +
-      '<button class="reporte-chip" data-periodo="q3" onclick="_selPeriodo(this)">Q3 Jul–Sep</button>' +
-      '<button class="reporte-chip" data-periodo="q4" onclick="_selPeriodo(this)">Q4 Oct–Dic</button>' +
+    // ── Año
+    '<div class="reporte-section-lbl">Año del reporte</div>' +
+    '<div class="reporte-chips" id="reporte-anio-chips">' +
+      (function(){
+        var y = new Date().getFullYear();
+        var s = '<button class="reporte-chip selected" data-anio="'+y+'" onclick="_selAnio(this)">'+y+' (actual)</button>';
+        for(var i=y-1; i>=y-6; i--)
+          s += '<button class="reporte-chip" data-anio="'+i+'" onclick="_selAnio(this)">'+i+'</button>';
+        return s;
+      })() +
     '</div>' +
 
     // ── Tipo de análisis
@@ -2409,8 +2419,12 @@ function _selReporteOpt(tipo) {
   document.getElementById('reporte-unidades').style.display = tipo==='unidad' ? 'block' : 'none';
 }
 
-function _selPeriodo(btn) {
+function _selPeriodo(btn) { // legacy
   document.querySelectorAll('[data-periodo]').forEach(function(b){ b.classList.remove('selected'); });
+  btn.classList.add('selected');
+}
+function _selAnio(btn) {
+  document.querySelectorAll('[data-anio]').forEach(function(b){ b.classList.remove('selected'); });
   btn.classList.add('selected');
 }
 
@@ -2439,8 +2453,8 @@ function _toggleTodasUnidades() {
 function _ejecutarReporte() {
   // Leer opciones
   var esGlobal  = document.getElementById('ropt-global').classList.contains('selected');
-  var periodBtn = document.querySelector('[data-periodo].selected');
-  var periodo   = periodBtn ? periodBtn.getAttribute('data-periodo') : 'anual';
+  var anioBtn   = document.querySelector('[data-anio].selected');
+  var anioReporte = anioBtn ? parseInt(anioBtn.getAttribute('data-anio')) : new Date().getFullYear();
   var analBtn   = document.querySelector('[data-analisis].selected');
   var analisis  = analBtn ? analBtn.getAttribute('data-analisis') : 'estado';
 
@@ -2459,75 +2473,41 @@ function _ejecutarReporte() {
   }, 100);
 
   if (analisis === 'proyeccion') {
-    _generarReporteProyeccion(unidades, periodo);
+    _generarReporteProyeccion(unidades, anioReporte);
   } else {
-    _generarReporteEstado(unidades, periodo, esGlobal);
+    _generarReporteEstado(unidades, anioReporte, esGlobal);
   }
 }
 
 // ── REPORTE DE ESTADO ACTUAL ─────────────────────────────────────────────────
-function _generarReporteEstado(unidades, periodo, esGlobal) {
+function _generarReporteEstado(unidades, anioReporte, esGlobal) {
   var fecha   = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
-  var periodoLabel = { anual:'Anual', q1:'Q1 Ene–Mar', q2:'Q2 Abr–Jun', q3:'Q3 Jul–Sep', q4:'Q4 Oct–Dic' };
   var titulo  = esGlobal ? 'Reporte General de Avance — DGCV' : 'Reporte por Unidad — DGCV';
-  var subtitulo = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · Período: ' + (periodoLabel[periodo]||periodo);
+  var subtitulo = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · Año: ' + anioReporte;
 
-  // Filtrar proyectos relevantes para el período:
-  // Incluye proyectos que (a) estaban activos durante el trimestre, o
-  // (b) cerraron/cierran dentro del trimestre seleccionado.
-  var Q_RANGO = periodo === 'anual' ? null : { q1:[1,3], q2:[4,6], q3:[7,9], q4:[10,12] }[periodo];
-  var anioRef  = new Date().getFullYear();
-
-  function filtroPeriodo(p) {
-    if (!Q_RANGO) return true; // Anual = todos
-
-    var qIni = Q_RANGO[0]; // mes inicio del trimestre (1-based)
-    var qFin = Q_RANGO[1]; // mes fin del trimestre (1-based)
-
-    // Fecha inicio del proyecto
-    var fIni = p.fechaInicio ? new Date(p.fechaInicio) : null;
-    // Fecha fin del proyecto (programada)
-    var fFin = p.fechaFinObra ? new Date(p.fechaFinObra) :
-               (fIni && p.plazo ? new Date(fIni.getTime() + parseInt(p.plazo)*86400000) : null);
-
-    // Si no hay ninguna fecha → incluir siempre (no excluir por falta de datos)
-    if (!fIni && !fFin) return true;
-
-    var inicioTrimestre = new Date(anioRef, qIni - 1, 1);
-    var finTrimestre    = new Date(anioRef, qFin, 0); // último día del mes qFin
-
-    // Proyecto activo (En Ejecución o En Proceso) → verificar si su ventana
-    // de ejecución se superpone con el trimestre
-    var estaActivo = p.estado === 'En Ejecución' || p.estado === 'En Proceso / Contratación';
-    if (estaActivo) {
-      // Se superpone si inició antes del fin del trimestre
-      // y no terminó antes del inicio del trimestre
-      var inicioAntes = !fIni || fIni <= finTrimestre;
-      var noTerminoAntes = !fFin || fFin >= inicioTrimestre;
-      if (inicioAntes && noTerminoAntes) return true;
+  // Filtrar proyectos por año: usa campo anioProyecto si existe,
+  // sino infiere del nProceso o fechaInicio
+  function filtroAnio(p) {
+    // 1. Campo explícito anioProyecto
+    if (p.anioProyecto && String(p.anioProyecto) === String(anioReporte)) return true;
+    if (p.anioProyecto && String(p.anioProyecto) !== String(anioReporte)) return false;
+    // 2. Inferir del N° de proceso (ej: CDE-SIT-087-2025 → 2025)
+    var nProc = p.nProceso || p.noContrato || p.noContratoSup || '';
+    var matchProc = nProc.match(/(\d{4})$/);
+    if (matchProc && matchProc[1] === String(anioReporte)) return true;
+    if (matchProc && matchProc[1] !== String(anioReporte)) return false;
+    // 3. Por fecha de inicio
+    if (p.fechaInicio) {
+      return new Date(p.fechaInicio).getFullYear() === anioReporte;
     }
-
-    // Proyecto Terminado o en cualquier estado → verificar si cerró en este trimestre
-    if (fFin) {
-      var mFin = fFin.getMonth() + 1;
-      var aFin = fFin.getFullYear();
-      if (aFin === anioRef && mFin >= qIni && mFin <= qFin) return true;
-    }
-
-    // Proyecto que inicia en este trimestre (por contratación)
-    if (fIni) {
-      var mIni = fIni.getMonth() + 1;
-      var aIni = fIni.getFullYear();
-      if (aIni === anioRef && mIni >= qIni && mIni <= qFin) return true;
-    }
-
-    return false;
+    // Sin datos suficientes: incluir para no perder proyectos
+    return true;
   }
 
   var allP = [];
   var unitData = [];
   unidades.forEach(function(k) {
-    var pl = (DB[k]||[]).filter(filtroPeriodo);
+    var pl = (DB[k]||[]).filter(filtroAnio);
     allP = allP.concat(pl);
     if (!UNIDADES[k]) return;
     var u = UNIDADES[k];
@@ -2570,7 +2550,7 @@ function _generarReporteEstado(unidades, periodo, esGlobal) {
         '<td style="padding:6px 10px;font-size:11px;font-family:monospace;">'+noContr+'</td>'+
         '<td style="padding:6px 10px;font-size:11px;max-width:200px;">'+p.proyecto.slice(0,60)+(p.proyecto.length>60?'…':'')+'</td>'+
         '<td style="padding:6px 10px;font-size:10px;">'+tipo+'</td>'+
-        '<td style="padding:6px 10px;font-size:10px;color:'+p.departamento?'#333':'#aaa'+';">'+( p.departamento||'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:10px;color:'+(p.departamento?'#333':'#aaa')+';">'+( p.departamento||'—')+'</td>'+
         '<td style="padding:6px 10px;text-align:center;"><span style="background:'+(sc[p.estado]||'#aaa')+'22;color:'+(sc[p.estado]||'#aaa')+';font-size:9px;padding:2px 7px;border-radius:8px;font-weight:600;">'+( p.estado||'—')+'</span></td>'+
         '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;color:#1268C4;">'+(parseFloat(p.avanceFisico)||0).toFixed(1)+'%</td>'+
         '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-size:11px;">L '+fmtL(vig)+'</td>'+
@@ -2617,8 +2597,7 @@ function _generarReporteEstado(unidades, periodo, esGlobal) {
     '.kpi-num{font-size:26px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'+
     '.kpi-lbl{font-size:10px;color:#7B8FA0;margin-top:4px;font-weight:500;}'+
     '.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:18px;overflow:hidden;}'+
-    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:11px;font-weight:700;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;}'+
-    '.section-title::before{content:"";display:inline-block;width:3px;height:14px;background:#D4A820;border-radius:2px;}'+
+    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:11px;font-weight:700;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;border-left:3px solid #D4A820;}'+
     '.section-body{padding:16px;}'+
     'table{width:100%;border-collapse:collapse;}'+
     'th{background:#f0f4f8;padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;white-space:nowrap;}'+
@@ -2668,100 +2647,104 @@ function _generarReporteEstado(unidades, periodo, esGlobal) {
 }
 
 // ── REPORTE DE PROYECCIÓN TRIMESTRAL ─────────────────────────────────────────
-function _generarReporteProyeccion(unidades, periodo) {
+function _generarReporteProyeccion(unidades, anioReporte) {
   var fecha = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
   var hoy   = new Date();
 
-  // La proyección siempre apunta al SIGUIENTE trimestre desde hoy
-  var mesActual = hoy.getMonth() + 1; // 1-12
-  var trimestreActual = mesActual <= 3 ? 'q1' : mesActual <= 6 ? 'q2' : mesActual <= 9 ? 'q3' : 'q4';
-  var siguienteQ = { q1:'q2', q2:'q3', q3:'q4', q4:'q1' }[trimestreActual];
-  var anioProyeccion = siguienteQ === 'q1' ? hoy.getFullYear() + 1 : hoy.getFullYear();
+  // Calcular automáticamente el siguiente trimestre desde hoy
+  var mesActual        = hoy.getMonth() + 1;
+  var trimestreActual  = mesActual <= 3 ? 'q1' : mesActual <= 6 ? 'q2' : mesActual <= 9 ? 'q3' : 'q4';
+  var sigQ             = { q1:'q2', q2:'q3', q3:'q4', q4:'q1' }[trimestreActual];
+  var anioMeta         = sigQ === 'q1' ? hoy.getFullYear() + 1 : hoy.getFullYear();
+  var Q_MESES          = { q1:3, q2:6, q3:9, q4:12 };
+  var Q_NOMBRE         = { q1:'Q1 (Ene-Mar)', q2:'Q2 (Abr-Jun)', q3:'Q3 (Jul-Sep)', q4:'Q4 (Oct-Dic)' };
 
-  var Q_LABELS = {
-    q1: 'Cierre Q1 — 31 Mar ' + anioProyeccion,
-    q2: 'Cierre Q2 — 30 Jun ' + anioProyeccion,
-    q3: 'Cierre Q3 — 30 Sep ' + anioProyeccion,
-    q4: 'Cierre Q4 — 31 Dic ' + anioProyeccion
-  };
-  var Q_MESES = { q1:3, q2:6, q3:9, q4:12 };
+  var fechaMeta   = new Date(anioMeta, Q_MESES[sigQ], 0); // último día del trimestre
+  var diasAlMeta  = Math.max(1, Math.round((fechaMeta - hoy) / (1000*60*60*24)));
+  var labelMeta   = Q_NOMBRE[sigQ] + ' ' + anioMeta;
 
-  var Q_TARGET = {
-    label: Q_LABELS[siguienteQ],
-    meses: Q_MESES[siguienteQ],
-    anio:  anioProyeccion,
-    qLabel: siguienteQ.toUpperCase()
-  };
-
-  // Fecha meta = último día del siguiente trimestre
-  var fechaMeta = new Date(anioProyeccion, Q_TARGET.meses - 1 + 1, 0); // último día del mes
-  var diasAlMeta = Math.max(1, Math.round((fechaMeta - hoy) / (1000*60*60*24)));
-
+  // Proyectar todos los activos (sin filtro de año para proyección)
   var allP = [];
   unidades.forEach(function(k) { allP = allP.concat(DB[k]||[]); });
-
-  // Filtrar solo proyectos activos (En Ejecución o En Proceso)
   var activos = allP.filter(function(p) {
     return p.estado === 'En Ejecución' || p.estado === 'En Proceso / Contratación';
   });
 
-  function proyectarAvance(p) {
-    var avActual = parseFloat(p.avanceFisico) || 0;
-    if (avActual >= 100) return 100;
-
-    var fechaIni = p.fechaInicio ? new Date(p.fechaInicio) : null;
-    var plazo    = parseInt(p.plazo) || 0;
-
-    if (fechaIni && plazo > 0) {
-      var diasTranscurridos = Math.max(1, Math.round((hoy - fechaIni) / (1000*60*60*24)));
-      var tasaDiaria = avActual / diasTranscurridos;
-      var proyectado = avActual + (tasaDiaria * diasAlMeta);
-      return Math.min(100, Math.round(proyectado * 10) / 10);
+  // ── Proyección física ───────────────────────────────────────
+  function proyectarFisico(p) {
+    var av = parseFloat(p.avanceFisico) || 0;
+    if (av >= 100) return 100;
+    var fIni = p.fechaInicio ? new Date(p.fechaInicio) : null;
+    if (fIni && fIni < hoy) {
+      var diasTrans = Math.max(1, Math.round((hoy - fIni) / 86400000));
+      return Math.min(100, Math.round((av + (av / diasTrans) * diasAlMeta) * 10) / 10);
     }
-    // Sin fechas de inicio: proyección usando días restantes al meta con tasa mensual estimada
-    var mesesTranscurridos = Math.max(1, hoy.getMonth() + 1); // meses desde inicio de año
-    var tasaMensual = avActual / mesesTranscurridos;
-    var mesesAlMeta = Math.max(1, diasAlMeta / 30.4);
-    return Math.min(100, Math.round((avActual + tasaMensual * mesesAlMeta) * 10) / 10);
+    var meses = Math.max(1, hoy.getMonth() + 1);
+    return Math.min(100, Math.round((av + (av / meses) * (diasAlMeta / 30.4)) * 10) / 10);
   }
 
-  function riesgo(p, proyectado) {
-    if (proyectado >= 100) return { nivel: 'ok', label: 'En tiempo', color: '#0D7A4E' };
-    if (!p.fechaFinObra && !p.plazo) return { nivel: 'sin-datos', label: 'Sin fecha fin', color: '#7B8FA0' };
-    var fechaFin = p.fechaFinObra ? new Date(p.fechaFinObra) :
-      (p.fechaInicio && p.plazo ? new Date(new Date(p.fechaInicio).getTime() + parseInt(p.plazo)*86400000) : null);
-    if (!fechaFin) return { nivel: 'sin-datos', label: 'Sin fecha fin', color: '#7B8FA0' };
-    if (fechaFin <= fechaMeta && proyectado < 100)
-      return { nivel: 'critico', label: 'En riesgo crítico', color: '#C0392B' };
-    if (fechaFin <= new Date(fechaMeta.getTime() + 30*86400000) && proyectado < 80)
-      return { nivel: 'alerta', label: 'Monitorear', color: '#B8620A' };
-    return { nivel: 'ok', label: 'En tiempo', color: '#0D7A4E' };
+  // ── Proyección financiera ───────────────────────────────────
+  function proyectarFinanciero(p) {
+    var avFin = parseFloat(p.avanceFinanciero) || 0;
+    if (avFin >= 100) return 100;
+    // Tasa: avance financiero actual / días transcurridos desde inicio
+    var fIni = p.fechaInicio ? new Date(p.fechaInicio) : null;
+    if (fIni && fIni < hoy) {
+      var diasTrans = Math.max(1, Math.round((hoy - fIni) / 86400000));
+      return Math.min(100, Math.round((avFin + (avFin / diasTrans) * diasAlMeta) * 10) / 10);
+    }
+    var meses = Math.max(1, hoy.getMonth() + 1);
+    return Math.min(100, Math.round((avFin + (avFin / meses) * (diasAlMeta / 30.4)) * 10) / 10);
   }
+
+  // ── Nivel de riesgo ─────────────────────────────────────────
+  function riesgo(p, proyFis) {
+    if (proyFis >= 100) return { nivel: 'ok',        label: 'En tiempo',        color: '#0D7A4E' };
+    var fFin = p.fechaFinObra ? new Date(p.fechaFinObra)
+             : (p.fechaInicio && p.plazo ? new Date(new Date(p.fechaInicio).getTime() + parseInt(p.plazo)*86400000) : null);
+    if (!fFin)           return { nivel: 'sin-datos', label: 'Sin fecha fin',    color: '#7B8FA0' };
+    if (fFin <= fechaMeta && proyFis < 100)
+                         return { nivel: 'critico',   label: 'En riesgo critico',color: '#C0392B' };
+    if (fFin <= new Date(fechaMeta.getTime() + 30*86400000) && proyFis < 80)
+                         return { nivel: 'alerta',    label: 'Monitorear',       color: '#B8620A' };
+    return               { nivel: 'ok',               label: 'En tiempo',        color: '#0D7A4E' };
+  }
+
+  function fmtL(n){ return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
   var rows = activos.map(function(p) {
-    var av  = parseFloat(p.avanceFisico) || 0;
-    var proy = proyectarAvance(p);
-    var delta = proy - av;
-    var r   = riesgo(p, proy);
-    var noContr = p.tipoProyecto==='supervision'?(p.noContratoSup||'—'):(p.noContrato||'—');
-    var empresa = p.tipoProyecto==='supervision'?(p.supervisora||'—'):(p.constructora||'—');
+    var avFis  = parseFloat(p.avanceFisico)     || 0;
+    var avFin  = parseFloat(p.avanceFinanciero) || 0;
+    var proyFis = proyectarFisico(p);
+    var proyFin = proyectarFinanciero(p);
+    var dFis   = proyFis - avFis;
+    var dFin   = proyFin - avFin;
+    var r      = riesgo(p, proyFis);
+    var noContr = p.tipoProyecto==='supervision' ? (p.noContratoSup||'—') : (p.noContrato||'—');
+    var empresa = p.tipoProyecto==='supervision' ? (p.supervisora||'—')   : (p.constructora||'—');
+    var mI=parseFloat(p.montoContratoInicial)||0; var mM=parseFloat(p.montoModificacion)||0;
+    var vigente = mM > 0 ? mM : mI;
+    var devActual  = parseFloat(p.totalDevengado) || 0;
+    var devProy    = vigente > 0 ? Math.min(vigente, vigente * proyFin / 100) : 0;
     return '<tr>'+
-      '<td style="padding:6px 10px;font-size:10px;font-family:monospace;white-space:nowrap;">'+noContr+'</td>'+
-      '<td style="padding:6px 10px;font-size:11px;max-width:180px;">'+p.proyecto.slice(0,55)+(p.proyecto.length>55?'…':'')+'</td>'+
-      '<td style="padding:6px 10px;font-size:10px;">'+( p.departamento||'—')+'</td>'+
-      '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-weight:700;color:#1268C4;">'+av.toFixed(1)+'%</td>'+
-      '<td style="padding:6px 10px;text-align:right;font-family:monospace;font-weight:700;color:#002B6B;">'+proy.toFixed(1)+'%</td>'+
-      '<td style="padding:6px 10px;text-align:right;font-family:monospace;color:'+(delta>=0?'#0D7A4E':'#C0392B')+';">'+(delta>=0?'+':'')+delta.toFixed(1)+'%</td>'+
-      '<td style="padding:6px 10px;text-align:center;"><span style="background:'+r.color+'22;color:'+r.color+';font-size:9px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;">'+r.label+'</span></td>'+
-      '<td style="padding:6px 10px;font-size:10px;max-width:140px;">'+empresa.slice(0,35)+'</td>'+
+      '<td style="padding:5px 8px;font-size:10px;font-family:monospace;white-space:nowrap;">'+noContr+'</td>'+
+      '<td style="padding:5px 8px;font-size:10px;max-width:160px;">'+p.proyecto.slice(0,50)+(p.proyecto.length>50?'...':'')+'</td>'+
+      '<td style="padding:5px 8px;font-size:10px;">'+(p.departamento||'—')+'</td>'+
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;font-size:10px;color:#1268C4;font-weight:700;">'+avFis.toFixed(1)+'%</td>'+
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;font-size:11px;color:#002B6B;font-weight:700;">'+proyFis.toFixed(1)+'%</td>'+
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;font-size:10px;color:'+(dFis>=0?'#0D7A4E':'#C0392B')+';">'+(dFis>=0?'+':'')+dFis.toFixed(1)+'%</td>'+
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;font-size:10px;color:#B8620A;font-weight:700;">'+avFin.toFixed(1)+'%</td>'+
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;font-size:11px;color:#002B6B;font-weight:700;">'+proyFin.toFixed(1)+'%</td>'+
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;font-size:10px;color:'+(dFin>=0?'#0D7A4E':'#C0392B')+';">'+(dFin>=0?'+':'')+dFin.toFixed(1)+'%</td>'+
+      '<td style="padding:5px 8px;text-align:right;font-family:monospace;font-size:10px;">L '+fmtL(devProy)+'</td>'+
+      '<td style="padding:5px 8px;text-align:center;"><span style="background:'+r.color+'22;color:'+r.color+';font-size:9px;padding:2px 6px;border-radius:8px;font-weight:600;white-space:nowrap;">'+r.label+'</span></td>'+
+      '<td style="padding:5px 8px;font-size:9px;max-width:120px;">'+empresa.slice(0,30)+'</td>'+
     '</tr>';
   }).join('');
 
-  var criticos = activos.filter(function(p){ return riesgo(p,proyectarAvance(p)).nivel==='critico'; }).length;
-  var alertas  = activos.filter(function(p){ return riesgo(p,proyectarAvance(p)).nivel==='alerta'; }).length;
-  var enTiempo = activos.filter(function(p){ return riesgo(p,proyectarAvance(p)).nivel==='ok'; }).length;
-
-  function fmtL(n){ return n.toLocaleString('es-HN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  var criticos = activos.filter(function(p){ return riesgo(p,proyectarFisico(p)).nivel==='critico'; }).length;
+  var alertas  = activos.filter(function(p){ return riesgo(p,proyectarFisico(p)).nivel==='alerta'; }).length;
+  var enTiempo = activos.filter(function(p){ return riesgo(p,proyectarFisico(p)).nivel==='ok'; }).length;
 
   var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>'+
     '<title>Proyección Trimestral DGCV — '+fecha+'</title>'+
@@ -2779,8 +2762,7 @@ function _generarReporteProyeccion(unidades, periodo) {
     '.kpi-num{font-size:26px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'+
     '.kpi-lbl{font-size:10px;color:#7B8FA0;margin-top:4px;font-weight:500;}'+
     '.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:18px;overflow:hidden;}'+
-    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:11px;font-weight:700;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;}'+
-    '.section-title::before{content:"";display:inline-block;width:3px;height:14px;background:#D4A820;border-radius:2px;}'+
+    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:11px;font-weight:700;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;border-left:3px solid #D4A820;}'+
     'table{width:100%;border-collapse:collapse;}'+
     'th{background:#f0f4f8;padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;white-space:nowrap;}'+
     'td{border-bottom:1px solid #f4f4f4;}tr:last-child td{border-bottom:none;}'+
@@ -2809,20 +2791,24 @@ function _generarReporteProyeccion(unidades, periodo) {
     '<div class="kpi g"><div class="kpi-num">'+enTiempo+'</div><div class="kpi-lbl">En Tiempo</div></div>'+
     '</div>'+
 
-    '<div class="section"><div class="section-title">Proyección al '+Q_TARGET.label+' — Proyectos Activos ('+activos.length+')</div>'+
+    '<div class="section"><div class="section-title">Proyeccion al '+labelMeta+' — Activos ('+activos.length+')</div>'+
     '<div style="overflow-x:auto;"><table><thead><tr>'+
-    '<th>N° Contrato</th><th>Proyecto</th><th>Depto.</th>'+
-    '<th style="text-align:right">Av. Actual</th>'+
-    '<th style="text-align:right">Proyección</th>'+
-    '<th style="text-align:right">Δ Esperado</th>'+
-    '<th style="text-align:center">Estado de Riesgo</th>'+
+    '<th>N Contrato</th><th>Proyecto</th><th>Depto.</th>'+
+    '<th style="text-align:right">Fis.Actual</th>'+
+    '<th style="text-align:right">Fis.Proyer.</th>'+
+    '<th style="text-align:right">Fis.Delta</th>'+
+    '<th style="text-align:right">Fin.Actual</th>'+
+    '<th style="text-align:right">Fin.Proyer.</th>'+
+    '<th style="text-align:right">Fin.Delta</th>'+
+    '<th style="text-align:right">Devengado Proy.</th>'+
+    '<th style="text-align:center">Riesgo</th>'+
     '<th>Empresa</th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div></div>'+
 
     '<div class="footer">Proyección generada por SIT-DGCV · '+fecha+' · Esta proyección es estimativa y de uso interno</div>'+
     '</div></body></html>';
 
-  _abrirVentanaReporte(html, 'Proyeccion_'+Q_TARGET.label.replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10));
+  _abrirVentanaReporte(html, 'Proyeccion_'+sigQ.toUpperCase()+'_'+anioMeta+'_'+new Date().toISOString().slice(0,10));
 }
 
 function _abrirVentanaReporte(html, nombre) {
