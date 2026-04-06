@@ -2398,9 +2398,10 @@ function abrirOpcionesReporte() {
 
     // ── Info proyección
     '<div id="reporte-proyeccion-info" style="display:none;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:10px 12px;margin-top:12px;font-size:11px;color:var(--az2);line-height:1.6;">' +
-      '<strong>Proyección trimestral:</strong> Basada en la tasa de avance actual de cada proyecto, ' +
-      'estima el avance físico y financiero esperado al cierre del siguiente trimestre, ' +
-      'e identifica proyectos en riesgo de no completarse en plazo.' +
+      '<strong>Proyección trimestral:</strong> El sistema detecta automáticamente el trimestre actual ' +
+      'y proyecta el avance físico y financiero esperado al cierre del <strong>siguiente trimestre</strong>. ' +
+      'Basada en la tasa de avance diaria de cada proyecto activo del año seleccionado. ' +
+      'Identifica proyectos en riesgo de no completarse en plazo.' +
     '</div>';
 
   // Cambiar botón de guardar
@@ -2484,24 +2485,36 @@ function _generarReporteEstado(unidades, anioReporte, esGlobal) {
   var fecha   = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
   var titulo  = esGlobal ? 'Reporte General de Avance — DGCV' : 'Reporte por Unidad — DGCV';
   var subtitulo = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · Año: ' + anioReporte;
+  var anioActual = new Date().getFullYear();
+  var badgeLabel = anioReporte === anioActual ? String(anioReporte) + ' (Año Actual)' : String(anioReporte);
 
   // Filtrar proyectos por año: usa campo anioProyecto si existe,
   // sino infiere del nProceso o fechaInicio
   function filtroAnio(p) {
-    // 1. Campo explícito anioProyecto
-    if (p.anioProyecto && String(p.anioProyecto) === String(anioReporte)) return true;
-    if (p.anioProyecto && String(p.anioProyecto) !== String(anioReporte)) return false;
+    // 1. Campo explícito anioProyecto — tiene prioridad absoluta
+    if (p.anioProyecto) {
+      return String(p.anioProyecto) === String(anioReporte);
+    }
     // 2. Inferir del N° de proceso (ej: CDE-SIT-087-2025 → 2025)
     var nProc = p.nProceso || p.noContrato || p.noContratoSup || '';
-    var matchProc = nProc.match(/(\d{4})$/);
-    if (matchProc && matchProc[1] === String(anioReporte)) return true;
-    if (matchProc && matchProc[1] !== String(anioReporte)) return false;
+    var matchProc = nProc.match(/(\d{4})/g);
+    // Buscar año de 4 dígitos que parezca año (2010-2099)
+    if (matchProc) {
+      var años = matchProc.filter(function(m){ return parseInt(m) >= 2010 && parseInt(m) <= 2099; });
+      if (años.length > 0) {
+        return años[años.length - 1] === String(anioReporte);
+      }
+    }
     // 3. Por fecha de inicio
     if (p.fechaInicio) {
       return new Date(p.fechaInicio).getFullYear() === anioReporte;
     }
-    // Sin datos suficientes: incluir para no perder proyectos
-    return true;
+    // 4. Por fecha de adjudicación
+    if (p.fechaAdjudicacion) {
+      return new Date(p.fechaAdjudicacion).getFullYear() === anioReporte;
+    }
+    // Sin datos suficientes: incluir solo si se pide el año actual
+    return anioReporte === new Date().getFullYear();
   }
 
   var allP = [];
@@ -2612,7 +2625,7 @@ function _generarReporteEstado(unidades, anioReporte, esGlobal) {
     '</style></head><body><div class="page">'+
 
     '<div class="header">'+
-    '<div><h1>'+titulo+'</h1><p>'+subtitulo+'</p><span class="badge">'+( periodoLabel[periodo]||periodo)+'</span></div>'+
+    '<div><h1>'+titulo+'</h1><p>'+subtitulo+'</p><span class="badge">'+badgeLabel+'</span></div>'+
     '<div class="fecha">Generado el<br><strong>'+fecha+'</strong></div>'+
     '</div>'+
 
@@ -2643,7 +2656,7 @@ function _generarReporteEstado(unidades, anioReporte, esGlobal) {
     '<div class="footer">SIT-DGCV · '+fecha+' · Secretaría de Infraestructura y Transporte · República de Honduras</div>'+
     '</div></body></html>';
 
-  _abrirVentanaReporte(html, 'Reporte_DGCV_'+periodo+'_'+new Date().toISOString().slice(0,10));
+  _abrirVentanaReporte(html, 'Reporte_DGCV_'+anioReporte+'_'+new Date().toISOString().slice(0,10));
 }
 
 // ── REPORTE DE PROYECCIÓN TRIMESTRAL ─────────────────────────────────────────
@@ -2663,9 +2676,17 @@ function _generarReporteProyeccion(unidades, anioReporte) {
   var diasAlMeta  = Math.max(1, Math.round((fechaMeta - hoy) / (1000*60*60*24)));
   var labelMeta   = Q_NOMBRE[sigQ] + ' ' + anioMeta;
 
-  // Proyectar todos los activos (sin filtro de año para proyección)
+  // Proyectar todos los activos — filtrar por año si está disponible
   var allP = [];
-  unidades.forEach(function(k) { allP = allP.concat(DB[k]||[]); });
+  unidades.forEach(function(k) {
+    var lista = (DB[k]||[]);
+    // Aplicar filtro de año si el año no es el actual (para proyección siempre preferir incluir activos sin importar año)
+    // Pero si hay campo anioProyecto explícito, respetar el filtro
+    lista.forEach(function(p) {
+      if (p.anioProyecto && String(p.anioProyecto) !== String(anioReporte)) return;
+      allP.push(p);
+    });
+  });
   var activos = allP.filter(function(p) {
     return p.estado === 'En Ejecución' || p.estado === 'En Proceso / Contratación';
   });
@@ -2773,8 +2794,8 @@ function _generarReporteProyeccion(unidades, anioReporte) {
 
     '<div class="header">'+
     '<div><h1>Proyección de Avance Trimestral — DGCV</h1>'+
-    '<p>'+unidades.map(function(k){return UNIDADES[k]?UNIDADES[k].nombre:k;}).join(', ')+'</p>'+
-    '<span class="badge">Proyección: '+Q_TARGET.label+' ('+diasAlMeta+' días)</span></div>'+
+    '<p>'+unidades.map(function(k){return UNIDADES[k]?UNIDADES[k].nombre:k;}).join(', ')+' · Año: '+anioReporte+'</p>'+
+    '<span class="badge">Proyección: '+labelMeta+' ('+diasAlMeta+' días)</span></div>'+
     '<div class="fecha">Generado el<br><strong>'+fecha+'</strong></div>'+
     '</div>'+
 
