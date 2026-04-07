@@ -1104,6 +1104,12 @@ function renderUnidad(u) {
           '<option value="construccion">Construcción</option>' +
           '<option value="supervision">Supervisión</option>' +
         '</select>' +
+        '<select class="filter-select" onchange="filterAnio(this.value,\''+u+'\')" id="filter-anio-'+u+'">' +
+          '<option value="">Todos los años</option>' +
+          '<option value="2026">2026</option>' +
+          '<option value="2025">2025</option>' +
+          '<option value="2024">2024</option>' +
+        '</select>' +
         (permsNew.canAdd ? '<button class="btn btn-primary" onclick="openForm(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
       '</div>' +
       '<div style="overflow-x:auto"><table class="tbl" id="tbl-'+u+'">' +
@@ -1139,31 +1145,51 @@ function filterTipo(tipo, u) {
   _applyFilters(u);
 }
 
+function filterAnio(anio, u) {
+  _applyFilters(u);
+}
+
 function _applyFilters(u) {
-  var plist    = DB[u] || [];
-  var estadoEl = document.querySelector('#tbl-'+u+' ~ * select.filter-select, .table-toolbar select.filter-select');
-  // Leer valores actuales de ambos filtros
+  var plist   = DB[u] || [];
+  var tipoEl  = document.getElementById('filter-tipo-'+u);
+  var anioEl  = document.getElementById('filter-anio-'+u);
+  var tipoSel = tipoEl  ? tipoEl.value  : '';
+  var anioSel = anioEl  ? anioEl.value  : '';
   var estadoSel = '';
-  var tipoSel   = '';
-  var selects   = document.querySelectorAll('.table-toolbar select.filter-select');
-  // Buscar el par de selects de esta unidad específica via IDs
-  var tipoEl = document.getElementById('filter-tipo-'+u);
-  if (tipoEl) tipoSel = tipoEl.value;
-  // Estado: primer select del toolbar (el que no tiene id)
+
+  // Leer estado del primer select (sin id fijo) dentro del toolbar de esta unidad
   var tbodyEl = document.getElementById('tbody-'+u);
   if (tbodyEl) {
-    var toolbar = tbodyEl.closest('.table-wrap') ? tbodyEl.closest('.table-wrap').querySelector('.table-toolbar') : null;
-    if (toolbar) {
-      var allSelects = toolbar.querySelectorAll('select.filter-select');
+    var wrapper = tbodyEl.closest('.table-wrap') || tbodyEl.closest('div');
+    while (wrapper && !wrapper.querySelector('.table-toolbar')) {
+      wrapper = wrapper.parentElement;
+    }
+    if (wrapper) {
+      var allSelects = wrapper.querySelectorAll('select.filter-select');
       if (allSelects[0]) estadoSel = allSelects[0].value;
     }
   }
+
   document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r, i) {
     var p = plist[i];
     if (!p) { r.style.display = 'none'; return; }
+
     var showEstado = !estadoSel || (p.estado || '') === estadoSel;
     var showTipo   = !tipoSel   || (p.tipoProyecto || 'construccion') === tipoSel;
-    r.style.display = (showEstado && showTipo) ? '' : 'none';
+
+    // Filtro por año — usa anioProyecto; si no existe, infiere del nProceso
+    var showAnio = true;
+    if (anioSel) {
+      var anioP = String(p.anioProyecto || '');
+      if (!anioP) {
+        // Inferir del número de proceso (ej: CDE-SIT-087-2025 → 2025)
+        var m = (p.nProceso || p.noContrato || p.noContratoSup || '').match(/(\d{4})$/);
+        anioP = m ? m[1] : '';
+      }
+      showAnio = anioP === anioSel;
+    }
+
+    r.style.display = (showEstado && showTipo && showAnio) ? '' : 'none';
   });
 }
 
@@ -1276,7 +1302,13 @@ function openDetail(u, i) {
       '</div>' +
     '</div>' +
     '<div class="dp-section"><div class="dp-section-title">Pagos ('+(p.pagos||[]).length+')</div>' + pagosHtml + '</div>' +
-    '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>';
+    '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>' +
+    '<div style="padding:18px 0 4px;">' +
+      '<button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px 20px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);">'+
+        '<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><rect x="2" y="1" width="9" height="12" rx="1.5" stroke="white" stroke-width="1.3"/><path d="M5 5h5M5 7.5h5M5 10h3" stroke="white" stroke-width="1.2" stroke-linecap="round"/><path d="M10 1v3h3" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'+
+        'Generar Ficha del Proyecto (DOCX)'+
+      '</button>' +
+    '</div>';
 
   document.getElementById('detailOverlay').classList.add('open');
 }
@@ -1290,6 +1322,211 @@ function toggleHistDetail(id) {
   var el = document.getElementById(id);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
+
+// ═══════════════════════════════════════════════════════════
+//  FICHA DE PROYECTO — Genera documento DOCX editable
+// ═══════════════════════════════════════════════════════════
+function generarReporteProyecto(u, idx) {
+  var p   = DB[u] && DB[u][idx] ? DB[u][idx] : null;
+  if (!p) { showToast('No se encontró el proyecto.', 'err'); return; }
+
+  var esSup   = p.tipoProyecto === 'supervision';
+  var noContr = esSup ? (p.noContratoSup || '—') : (p.noContrato || '—');
+  var empresa = esSup ? (p.supervisora  || '—') : (p.constructora || '—');
+  var fecha   = new Date().toLocaleDateString('es-HN', {day:'2-digit', month:'long', year:'numeric'});
+  var mI      = parseFloat(p.montoContratoInicial) || 0;
+  var mM      = parseFloat(p.montoModificacion)    || 0;
+  var vigente = mM > 0 ? mM : mI;
+  var af      = parseFloat(p.avanceFisico)     || 0;
+  var afin    = parseFloat(p.avanceFinanciero) || 0;
+  var dev     = parseFloat(p.totalDevengado)   || 0;
+  var deuda   = parseFloat(p.deuda)            || 0;
+  var unidNombre = UNIDADES[u] ? UNIDADES[u].nombre : u;
+
+  function fmtL(n) {
+    var v = parseFloat(n);
+    return isNaN(v) ? '—' : 'L ' + v.toLocaleString('es-HN', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+
+  // Modificaciones
+  var mods = (p.modificaciones && p.modificaciones.length) ? p.modificaciones
+           : (p.montoModificacion ? [{tipo:'Modificación',numero:'',monto:p.montoModificacion,plazo:'',fecha:'',descripcion:'Dato importado'}] : []);
+
+  var modsRows = mods.map(function(m, mi) {
+    return '<tr><td>'+(mi+1)+'</td><td>'+(m.tipo||'—')+'</td><td>'+(m.numero||'—')+'</td><td>'+fmtL(m.monto)+'</td><td>'+(m.plazo?m.plazo+' días':'—')+'</td><td>'+(m.fecha||'—')+'</td><td>'+(m.descripcion||'—')+'</td></tr>';
+  }).join('');
+
+  // Pagos
+  var pagosRows = (p.pagos||[]).map(function(pg, pi) {
+    return '<tr><td>'+(pi+1)+'</td><td>'+fmtL(pg.monto)+'</td><td>'+(pg.fechaIngreso||'—')+'</td><td>'+(pg.contexto||'—')+'</td></tr>';
+  }).join('');
+
+  // Fianzas
+  var fianzasRows = '';
+  if (p.nFianzaAnticipo)     fianzasRows += '<tr><td>Anticipo</td><td>'+p.nFianzaAnticipo+'</td><td>'+(p.iniFA||'—')+' → '+(p.finFA||'—')+'</td><td>'+fmtL(p.montoFianzaAnticipo)+'</td></tr>';
+  if (p.nFianzaCumplimiento) fianzasRows += '<tr><td>Cumplimiento</td><td>'+p.nFianzaCumplimiento+'</td><td>'+(p.iniFC||'—')+' → '+(p.finFC||'—')+'</td><td>'+fmtL(p.montoFianzaCumplimiento)+'</td></tr>';
+  if (p.nFianzaCalidad)      fianzasRows += '<tr><td>Calidad</td><td>'+p.nFianzaCalidad+'</td><td>'+(p.iniFCal||'—')+' → '+(p.finFCal||'—')+'</td><td>'+fmtL(p.montoFianzaCalidad)+'</td></tr>';
+  if (!fianzasRows)          fianzasRows  = '<tr><td colspan="4" style="text-align:center;color:#888;">Sin garantías registradas</td></tr>';
+
+  // Estado badge color
+  var estColor = {
+    'En Ejecución':'#0D7A4E','En Proceso / Contratación':'#1268C4',
+    'Suspendido':'#B8620A','Terminado':'#7B8FA0'
+  }[p.estado] || '#333';
+
+  // Barra de avance SVG helper
+  function svgBar(pct, color) {
+    var w = Math.min(Math.max(pct,0),100);
+    return '<svg width="200" height="14" viewBox="0 0 200 14"><rect width="200" height="14" rx="7" fill="#e8ecf0"/><rect width="'+w*2+'" height="14" rx="7" fill="'+color+'"/><text x="104" y="10" text-anchor="middle" font-size="9" fill="white" font-family="Arial" font-weight="bold">'+pct.toFixed(1)+'%</text></svg>';
+  }
+
+  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><title>Ficha — '+noContr+'</title>' +
+  '<style>' +
+  'body{font-family:Arial,sans-serif;color:#1C2B3A;font-size:11pt;margin:0;padding:0;}' +
+  '.page{max-width:750px;margin:0 auto;padding:28px 32px;}' +
+  '.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:0;border-bottom:4px solid #D4A820;margin-bottom:0;display:flex;align-items:stretch;}' +
+  '.header-left{padding:20px 24px;flex:1;}' +
+  '.header-right{padding:20px 24px;text-align:right;min-width:160px;display:flex;flex-direction:column;justify-content:space-between;}' +
+  '.inst{font-size:8pt;opacity:.7;margin-bottom:2px;}' +
+  '.doc-title{font-size:16pt;font-weight:700;margin:4px 0 2px;}' +
+  '.tipo-badge{display:inline-block;background:rgba(212,168,32,.3);color:#F0C040;font-size:8pt;font-weight:700;padding:2px 10px;border-radius:10px;letter-spacing:.5px;}' +
+  '.fecha-gen{font-size:8pt;opacity:.65;}' +
+  '.unidad-badge{font-size:8pt;background:rgba(255,255,255,.15);padding:3px 10px;border-radius:8px;margin-top:6px;display:inline-block;}' +
+  '.contrato-num{font-size:13pt;font-weight:700;font-family:monospace;letter-spacing:.5px;}' +
+  '.section{margin:18px 0 0;}' +
+  '.sec-title{font-size:9pt;font-weight:700;color:#002B6B;text-transform:uppercase;letter-spacing:.6px;padding:6px 12px;background:#EDF5FC;border-left:4px solid #D4A820;margin-bottom:0;}' +
+  '.sec-body{border:1px solid #D0DCE6;border-top:none;padding:14px 16px;}' +
+  '.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;}' +
+  '.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px;}' +
+  '.field-lbl{font-size:8pt;color:#7B8FA0;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px;}' +
+  '.field-val{font-size:10pt;color:#1C2B3A;font-weight:500;}' +
+  '.field-val.mono{font-family:monospace;}' +
+  '.estado-badge{display:inline-block;padding:3px 12px;border-radius:10px;font-size:9pt;font-weight:700;}' +
+  'table{width:100%;border-collapse:collapse;font-size:9pt;}' +
+  'th{background:#f0f4f8;padding:6px 10px;text-align:left;font-size:8pt;color:#7B8FA0;font-weight:700;border-bottom:2px solid #D0DCE6;}' +
+  'td{padding:6px 10px;border-bottom:1px solid #f0f0f0;}' +
+  'tr:last-child td{border-bottom:none;}' +
+  '.fin-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:2px;}' +
+  '.fin-box{text-align:center;background:#f8f9fb;border-radius:6px;padding:10px 8px;border:1px solid #e0e8f0;}' +
+  '.fin-lbl{font-size:8pt;color:#7B8FA0;margin-bottom:3px;}' +
+  '.fin-val{font-size:11pt;font-weight:700;font-family:monospace;}' +
+  '.avance-wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:2px;}' +
+  '.av-item{display:flex;flex-direction:column;gap:4px;}' +
+  '.av-lbl{font-size:8pt;color:#7B8FA0;font-weight:600;}' +
+  '.footer{text-align:center;font-size:8pt;color:#aaa;margin-top:24px;padding-top:12px;border-top:1px solid #eee;}' +
+  '@media print{body{margin:0;}@page{margin:12mm 10mm;size:A4;}}' +
+  '</style></head><body>' +
+  '<div class="page">' +
+
+  // Header
+  '<div class="header">' +
+    '<div class="header-left">' +
+      '<div class="inst">República de Honduras · Secretaría de Infraestructura y Transporte</div>' +
+      '<div class="inst">Dirección General de Conservación Vial — DGCV</div>' +
+      '<div class="doc-title">Ficha de Proyecto</div>' +
+      '<div class="tipo-badge">'+(esSup?'SUPERVISIÓN':'CONSTRUCCIÓN')+'</div>' +
+    '</div>' +
+    '<div class="header-right">' +
+      '<div>' +
+        '<div class="fecha-gen">Generado el</div>' +
+        '<div style="font-size:9pt;font-weight:600;">'+fecha+'</div>' +
+      '</div>' +
+      '<div class="contrato-num">'+noContr+'</div>' +
+      '<div class="unidad-badge">'+unidNombre.replace('Respuesta Rápida a Emergencias','Resp. Rápida')+'</div>' +
+    '</div>' +
+  '</div>' +
+
+  // 1. Identificación
+  '<div class="section"><div class="sec-title">1. Identificación del Proyecto</div><div class="sec-body">' +
+    '<div style="margin-bottom:10px"><div class="field-lbl">Nombre del Proyecto</div><div class="field-val" style="font-size:11pt;font-weight:600;">'+( p.proyecto||'—')+'</div></div>' +
+    '<div class="grid3">' +
+      '<div><div class="field-lbl">N° Proceso</div><div class="field-val mono">'+(p.nProceso||'—')+'</div></div>' +
+      '<div><div class="field-lbl">N° Contrato</div><div class="field-val mono">'+noContr+'</div></div>' +
+      '<div><div class="field-lbl">Estado</div><div><span class="estado-badge" style="background:'+estColor+'22;color:'+estColor+';">'+(p.estado||'—')+'</span></div></div>' +
+      '<div><div class="field-lbl">Año</div><div class="field-val">'+(p.anioProyecto||'—')+'</div></div>' +
+      '<div><div class="field-lbl">Tipo</div><div class="field-val">'+(esSup?'Supervisión':'Construcción')+'</div></div>' +
+      (p.longitud ? '<div><div class="field-lbl">Longitud</div><div class="field-val">'+p.longitud+' km</div></div>' : '') +
+    '</div>' +
+  '</div></div>' +
+
+  // 2. Ubicación
+  '<div class="section"><div class="sec-title">2. Ubicación Geográfica</div><div class="sec-body">' +
+    '<div class="grid3">' +
+      '<div><div class="field-lbl">Departamento</div><div class="field-val">'+(p.departamento||'—')+'</div></div>' +
+      '<div><div class="field-lbl">Municipio</div><div class="field-val">'+(p.municipio||'—')+'</div></div>' +
+      '<div><div class="field-lbl">Aldea / Barrio</div><div class="field-val">'+(p.aldeaBarrio||'—')+'</div></div>' +
+      (p.latitud ? '<div><div class="field-lbl">Latitud</div><div class="field-val mono">'+p.latitud+'</div></div>' : '') +
+      (p.longitudRef ? '<div><div class="field-lbl">Longitud GPS</div><div class="field-val mono">'+p.longitudRef+'</div></div>' : '') +
+    '</div>' +
+  '</div></div>' +
+
+  // 3. Empresa y personal
+  '<div class="section"><div class="sec-title">3. '+(esSup?'Empresa Supervisora':'Empresa Constructora y Supervisión')+'</div><div class="sec-body">' +
+    '<div class="grid2">' +
+      '<div><div class="field-lbl">'+(esSup?'Supervisora':'Constructora')+'</div><div class="field-val">'+empresa+'</div></div>' +
+      '<div><div class="field-lbl">Coordinador</div><div class="field-val">'+(p.coordinador||'—')+'</div></div>' +
+      (esSup ? '<div><div class="field-lbl">Contratos que Supervisa</div><div class="field-val mono" style="font-size:9pt;">'+(p.contratosSupervisa||'—')+'</div></div>' : '') +
+      (!esSup && p.tipoSupervision ? '<div><div class="field-lbl">Tipo de Supervisión</div><div class="field-val">'+(p.tipoSupervision==='interna'?'Interna DGCV':'Externa')+'</div></div>' : '') +
+      (!esSup && p.supervisorCampo ? '<div><div class="field-lbl">Supervisor de Campo</div><div class="field-val">'+p.supervisorCampo+'</div></div>' : '') +
+      (!esSup && p.supervisora && p.tipoSupervision==='externa' ? '<div><div class="field-lbl">Empresa Supervisora</div><div class="field-val">'+p.supervisora+'</div></div>' : '') +
+    '</div>' +
+  '</div></div>' +
+
+  // 4. Fechas y plazo
+  '<div class="section"><div class="sec-title">4. Fechas y Plazo de Ejecución</div><div class="sec-body">' +
+    '<div class="grid3">' +
+      '<div><div class="field-lbl">Fecha Adjudicación</div><div class="field-val">'+(p.fechaAdjudicacion||'—')+'</div></div>' +
+      '<div><div class="field-lbl">Fecha de Contrato</div><div class="field-val">'+(p.fechaContrato||'—')+'</div></div>' +
+      '<div><div class="field-lbl">Fecha de Inicio</div><div class="field-val">'+(p.fechaInicio||'—')+'</div></div>' +
+      '<div><div class="field-lbl">Plazo (días)</div><div class="field-val">'+(p.plazo?p.plazo+' días':'—')+'</div></div>' +
+      '<div><div class="field-lbl">Fecha Fin Programada</div><div class="field-val">'+(p.fechaFinObra||'—')+'</div></div>' +
+    '</div>' +
+  '</div></div>' +
+
+  // 5. Avance
+  '<div class="section"><div class="sec-title">5. Avance del Proyecto</div><div class="sec-body">' +
+    '<div class="avance-wrap">' +
+      '<div class="av-item"><div class="av-lbl">Avance Físico</div>'+svgBar(af,'#1268C4')+'</div>' +
+      '<div class="av-item"><div class="av-lbl">Avance Financiero</div>'+svgBar(afin,'#0D7A4E')+'</div>' +
+    '</div>' +
+  '</div></div>' +
+
+  // 6. Información Financiera
+  '<div class="section"><div class="sec-title">6. Información Financiera</div><div class="sec-body">' +
+    '<div class="fin-grid" style="margin-bottom:12px;">' +
+      '<div class="fin-box"><div class="fin-lbl">Monto Contrato Inicial</div><div class="fin-val" style="color:#001233;">'+fmtL(mI)+'</div></div>' +
+      (mM>0?'<div class="fin-box"><div class="fin-lbl">Monto Modificado</div><div class="fin-val" style="color:#B8620A;">'+fmtL(mM)+'</div></div>':'') +
+      '<div class="fin-box"><div class="fin-lbl">Monto Vigente</div><div class="fin-val" style="color:#002B6B;">'+fmtL(vigente)+'</div></div>' +
+      '<div class="fin-box"><div class="fin-lbl">Total Devengado</div><div class="fin-val" style="color:#0D7A4E;">'+fmtL(dev)+'</div></div>' +
+      '<div class="fin-box"><div class="fin-lbl">Saldo Pendiente</div><div class="fin-val" style="color:'+(deuda<0?'#C0392B':'#1C2B3A')+';">'+fmtL(deuda)+'</div></div>' +
+    '</div>' +
+    (mods.length ? '<div style="margin-top:8px;"><div style="font-size:8pt;font-weight:700;color:#7B8FA0;margin-bottom:4px;">MODIFICACIONES / ÓRDENES DE CAMBIO</div><table><thead><tr><th>#</th><th>Tipo</th><th>N° Doc.</th><th>Monto</th><th>Plazo</th><th>Fecha</th><th>Descripción</th></tr></thead><tbody>'+modsRows+'</tbody></table></div>' : '') +
+  '</div></div>' +
+
+  // 7. Pagos
+  '<div class="section"><div class="sec-title">7. Pagos y Estimaciones ('+(p.pagos||[]).length+')</div><div class="sec-body">' +
+    ((p.pagos||[]).length ?
+      '<table><thead><tr><th>#</th><th>Monto</th><th>Fecha</th><th>Descripción / Contexto</th></tr></thead><tbody>'+pagosRows+'</tbody></table>' :
+      '<div style="text-align:center;color:#888;padding:8px;">Sin pagos registrados</div>') +
+  '</div></div>' +
+
+  // 8. Garantías
+  '<div class="section"><div class="sec-title">8. Garantías / Fianzas</div><div class="sec-body">' +
+    '<table><thead><tr><th>Tipo</th><th>N° Fianza</th><th>Vigencia</th><th>Monto</th></tr></thead><tbody>'+fianzasRows+'</tbody></table>' +
+  '</div></div>' +
+
+  // Footer
+  '<div class="footer">DGCV — Sistema de Información de Transporte · Ficha generada el '+fecha+' · Este documento es editable</div>' +
+
+  '</div></body></html>';
+
+  // Abrir en nueva pestaña (permite imprimir como PDF o guardar como HTML editable)
+  var win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+  win.document.title = 'Ficha — ' + noContr;
+}
+
 
 function closeDetail(e) {
   if (e && e.target !== document.getElementById('detailOverlay')) return;
