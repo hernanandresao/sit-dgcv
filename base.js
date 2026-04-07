@@ -1720,8 +1720,29 @@ function generarReporteProyecto(u, idx) {
     '<table><thead><tr><th>Tipo</th><th>N° Fianza</th><th>Vigencia</th><th>Monto</th></tr></thead><tbody>'+fianzasRows+'</tbody></table>' +
   '</div></div>' +
 
+  // 9. Fotos del proyecto
+  (function() {
+    var fotos = p.fotos || [];
+    if (!fotos.length) return '';
+    // Convertir URLs a base64 para que funcionen offline en el HTML
+    // (las URLs de Supabase son públicas, se cargan directamente)
+    var fotosHtml = fotos.map(function(f, fi) {
+      return '<div style="break-inside:avoid;display:flex;flex-direction:column;gap:6px;">' +
+        '<img src="'+f.url+'" style="width:100%;height:180px;object-fit:cover;border-radius:6px;border:1px solid #D0DCE6;" />' +
+        '<div style="font-size:8pt;color:#7B8FA0;text-align:center;">' +
+          (f.fecha ? '<span style="font-family:monospace;">'+f.fecha+'</span> · ' : '') +
+          (f.descripcion || 'Foto '+(fi+1)) +
+        '</div>' +
+      '</div>';
+    }).join('');
+    return '<div class="section"><div class="sec-title">9. Registro Fotográfico ('+fotos.length+' foto'+( fotos.length!==1?'s':'')+') </div>' +
+      '<div class="sec-body" style="padding:14px 16px;">' +
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">'+fotosHtml+'</div>' +
+      '</div></div>';
+  })() +
+
   // Footer
-  '<div class="footer">DGCV — Sistema de Información de Transporte · Ficha generada el '+fecha+' · Este documento es editable</div>' +
+  '<div class="footer">DGCV — Sistema de Información de Transporte · Ficha generada el '+fecha+'</div>' +
 
   '</div></body></html>';
 
