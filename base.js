@@ -3102,34 +3102,17 @@ function _generarReporteProyeccion(unidades, anioReporte) {
 }
 
 function _abrirVentanaReporte(html, nombre) {
-  showToast('Generando reporte...', 'ok');
-  var nombreArchivo = nombre + '.pdf';
-
-  function ejecutar() {
-    var contenedor = document.createElement('div');
-    contenedor.innerHTML = html;
-    contenedor.style.cssText = 'position:absolute;left:-9999px;top:0;';
-    document.body.appendChild(contenedor);
-    var opt = {
-      margin: [8,8,8,8],
-      filename: nombreArchivo,
-      image: { type:'jpeg', quality:0.97 },
-      html2canvas: { scale:2, useCORS:true, logging:false },
-      jsPDF: { unit:'mm', format:'a4', orientation:'landscape' },
-      pagebreak: { mode:['avoid-all','css','legacy'] }
-    };
-    html2pdf().set(opt).from(contenedor.querySelector('.page')||contenedor).save()
-      .then(function(){ document.body.removeChild(contenedor); showToast('[OK] PDF descargado: '+nombreArchivo, 'ok'); })
-      .catch(function(e){ document.body.removeChild(contenedor); showToast('Error al generar PDF: '+e.message,'err'); });
+  // Abrir HTML en nueva pestaña — sin conversión, sin errores tipográficos
+  // Desde la pestaña el usuario puede imprimir o guardar como PDF con Ctrl+P
+  var win = window.open('', '_blank');
+  if (!win) {
+    showToast('Permita las ventanas emergentes para generar el reporte.', 'err');
+    return;
   }
-
-  if (typeof html2pdf === 'undefined') {
-    var script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.onload = ejecutar;
-    script.onerror = function(){ showToast('No se pudo cargar la librería PDF.','err'); };
-    document.head.appendChild(script);
-  } else { ejecutar(); }
+  win.document.write(html);
+  win.document.close();
+  win.document.title = nombre;
+  showToast('Reporte generado. Use Ctrl+P para imprimir o guardar como PDF.', 'ok');
 }
 
 function generarReporte_OLD() {
