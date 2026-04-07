@@ -728,6 +728,8 @@ async function doLogin() {
     if (navEmpresas)        navEmpresas.style.display        = currentUser.esGlobalAdmin ? 'flex' : 'none';
     var reportBtn = document.getElementById('reportBtn');
     if (reportBtn) reportBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
+    var excelBtn = document.getElementById('excelBtn');
+    if (excelBtn) excelBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
 
     if (!currentUser.esAdmin && !currentUser.esGlobalViewer) {
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
@@ -2832,6 +2834,263 @@ function generarReporte() {
   // Abrir modal con opciones en lugar de generar directo
   abrirOpcionesReporte();
 }
+
+// ═══════════════════════════════════════════════════════════
+//  EXPORTAR EXCEL — SheetJS
+// ═══════════════════════════════════════════════════════════
+function abrirExportarExcel() {
+  // Reutilizar el mismo modal de opciones que el reporte HTML
+  // pero con botón "Exportar Excel"
+  var unidadOpts = Object.entries(UNIDADES).map(function(e) {
+    var k = e[0]; var u = e[1];
+    var count = (DB[k]||[]).length;
+    return '<label class="reporte-unidad-item" id="eu-'+k+'">' +
+      '<input type="checkbox" class="eu-check" value="'+k+'" checked ' +
+        'onchange="_toggleUnidadExcel(this)" style="accent-color:var(--az2)"/>' +
+      '<span style="flex:1">'+u.nombre+'</span>' +
+      '<span style="font-size:10px;font-family:var(--mono);color:var(--gris3)">'+count+'</span>' +
+    '</label>';
+  }).join('');
+
+  document.getElementById('modalTitle').textContent = 'Exportar a Excel';
+  document.getElementById('modalBody').innerHTML =
+    '<div class="reporte-section-lbl">Cobertura</div>' +
+    '<div class="reporte-selector">' +
+      '<div class="reporte-opt selected" id="eopt-global" onclick="_selExcelOpt(&quot;global&quot;)">' +
+        '<div class="reporte-opt-icon"><svg viewBox="0 0 24 24" fill="none" width="26" height="26"><circle cx="12" cy="12" r="10" stroke="#0D7A4E" stroke-width="1.8"/><path d="M12 2C12 2 8 7 8 12s4 10 4 10M12 2c0 0 4 5 4 10s-4 10-4 10M2 12h20" stroke="#0D7A4E" stroke-width="1.6" stroke-linecap="round"/></svg></div>' +
+        '<div class="reporte-opt-title">Global</div>' +
+        '<div class="reporte-opt-desc">Todas las unidades</div>' +
+      '</div>' +
+      '<div class="reporte-opt" id="eopt-unidad" onclick="_selExcelOpt(&quot;unidad&quot;)">' +
+        '<div class="reporte-opt-icon"><svg viewBox="0 0 24 24" fill="none" width="26" height="26"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="#0D7A4E" stroke-width="1.8"/></svg></div>' +
+        '<div class="reporte-opt-title">Por Unidad</div>' +
+        '<div class="reporte-opt-desc">Seleccione unidades</div>' +
+      '</div>' +
+    '</div>' +
+
+    '<div id="excel-unidades" style="display:none;margin-bottom:14px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+        '<span style="font-size:11px;color:var(--gris3)">Unidades a exportar:</span>' +
+        '<button onclick="_toggleTodasExcel()" style="font-size:10px;color:var(--az2);background:none;border:none;cursor:pointer;font-family:var(--font);">Seleccionar todas</button>' +
+      '</div>' +
+      '<div class="reporte-unidad-grid">'+unidadOpts+'</div>' +
+    '</div>' +
+
+    '<div class="reporte-section-lbl">Filtrar por año</div>' +
+    '<div class="reporte-chips" id="excel-anio-chips">' +
+      (function() {
+        var y = new Date().getFullYear();
+        var s = '<button class="reporte-chip selected" data-eanio="todos" onclick="_selExcelAnio(this)">Todos los años</button>';
+        s += '<button class="reporte-chip" data-eanio="'+y+'" onclick="_selExcelAnio(this)">'+y+'</button>';
+        for (var i = y-1; i >= 2024; i--)
+          s += '<button class="reporte-chip" data-eanio="'+i+'" onclick="_selExcelAnio(this)">'+i+'</button>';
+        return s;
+      })() +
+    '</div>';
+
+  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+  if (btnGuardar) {
+    btnGuardar.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="white" stroke-width="1.3"/><path d="M3.5 4.5L5 7l-1.5 2.5M7 9.5h3M7 7h3M7 4.5h3" stroke="white" stroke-width="1.2" stroke-linecap="round"/></svg> Exportar Excel';
+    btnGuardar.onclick = _ejecutarExportExcel;
+    btnGuardar.style.display = '';
+  }
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function _selExcelOpt(tipo) {
+  document.getElementById('eopt-global').classList.toggle('selected', tipo === 'global');
+  document.getElementById('eopt-unidad').classList.toggle('selected', tipo === 'unidad');
+  document.getElementById('excel-unidades').style.display = tipo === 'unidad' ? 'block' : 'none';
+}
+
+function _selExcelAnio(btn) {
+  document.querySelectorAll('[data-eanio]').forEach(function(b) { b.classList.remove('selected'); });
+  btn.classList.add('selected');
+}
+
+function _toggleUnidadExcel(chk) {
+  var item = chk.closest('.reporte-unidad-item');
+  if (item) item.classList.toggle('selected', chk.checked);
+}
+
+function _toggleTodasExcel() {
+  var checks = document.querySelectorAll('.eu-check');
+  var allChecked = Array.from(checks).every(function(c) { return c.checked; });
+  checks.forEach(function(c) {
+    c.checked = !allChecked;
+    var item = c.closest('.reporte-unidad-item');
+    if (item) item.classList.toggle('selected', !allChecked);
+  });
+}
+
+function _ejecutarExportExcel() {
+  var esGlobal = document.getElementById('eopt-global').classList.contains('selected');
+  var anioBtn  = document.querySelector('[data-eanio].selected');
+  var anioSel  = anioBtn ? anioBtn.getAttribute('data-eanio') : 'todos';
+
+  var unidades = esGlobal
+    ? Object.keys(UNIDADES)
+    : Array.from(document.querySelectorAll('.eu-check:checked')).map(function(c) { return c.value; });
+
+  if (!unidades.length) { showToast('Seleccione al menos una unidad.', 'err'); return; }
+  closeModal();
+
+  // Recuperar botón de guardar original
+  setTimeout(function() {
+    var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+    if (btnGuardar) btnGuardar.onclick = saveProject;
+  }, 100);
+
+  // Cargar SheetJS si no está disponible
+  if (typeof XLSX === 'undefined') {
+    showToast('Cargando librería Excel...', 'ok');
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload  = function() { _generarExcel(unidades, anioSel, esGlobal); };
+    script.onerror = function() { showToast('No se pudo cargar la librería Excel.', 'err'); };
+    document.head.appendChild(script);
+  } else {
+    _generarExcel(unidades, anioSel, esGlobal);
+  }
+}
+
+function _generarExcel(unidades, anioSel, esGlobal) {
+  showToast('Generando Excel...', 'ok');
+
+  // Función para inferir año
+  function getAnio(p) {
+    if (p.anioProyecto) return String(p.anioProyecto);
+    var m = (p.nProceso || p.noContrato || p.noContratoSup || '').match(/(\d{4})$/);
+    return m ? m[1] : '';
+  }
+
+  // Filtrar proyectos
+  var todos = [];
+  unidades.forEach(function(k) {
+    (DB[k] || []).forEach(function(p) {
+      if (anioSel !== 'todos' && getAnio(p) !== anioSel) return;
+      todos.push({ p: p, unidad: k });
+    });
+  });
+
+  if (!todos.length) { showToast('No hay proyectos con esos filtros.', 'err'); return; }
+
+  function fmtN(n) { var v = parseFloat(n); return isNaN(v) ? 0 : v; }
+  function fmtS(v) { return v || ''; }
+  var fecha = new Date().toLocaleDateString('es-HN');
+
+  // ── HOJA 1: Básica ──────────────────────────────────────────
+  var basicHeaders = [
+    'N° Proceso','N° Contrato','Año','Tipo','Proyecto',
+    'Departamento','Municipio','Estado','Empresa',
+    'Coordinador','Av. Físico (%)','Av. Financiero (%)',
+    'Monto Contrato (L)','Monto Modificado (L)','Monto Vigente (L)',
+    'Total Devengado (L)','Deuda Pendiente (L)','Unidad'
+  ];
+
+  var basicRows = todos.map(function(item) {
+    var p = item.p;
+    var esSup = p.tipoProyecto === 'supervision';
+    var nc    = esSup ? fmtS(p.noContratoSup) : fmtS(p.noContrato);
+    var emp   = esSup ? fmtS(p.supervisora)   : fmtS(p.constructora);
+    var mI    = fmtN(p.montoContratoInicial);
+    var mM    = fmtN(p.montoModificacion);
+    var vig   = mM > 0 ? mM : mI;
+    return [
+      fmtS(p.nProceso), nc, getAnio(p),
+      esSup ? 'Supervisión' : 'Construcción',
+      fmtS(p.proyecto),
+      fmtS(p.departamento), fmtS(p.municipio),
+      fmtS(p.estado), emp, fmtS(p.coordinador),
+      fmtN(p.avanceFisico), fmtN(p.avanceFinanciero),
+      mI, mM, vig,
+      fmtN(p.totalDevengado), fmtN(p.deuda),
+      UNIDADES[item.unidad] ? UNIDADES[item.unidad].nombre : item.unidad
+    ];
+  });
+
+  // ── HOJA 2: Detalle completo ───────────────────────────────
+  var detHeaders = [
+    'N° Proceso','N° Contrato','Año','Tipo','Proyecto','Descripción',
+    'Departamento','Municipio','Aldea/Barrio','Latitud','Longitud GPS',
+    'Longitud (km)','Estado','Empresa','Coordinador','Supervisor Campo',
+    'Tipo Supervisión','Fecha Adjudicación','Fecha Contrato','Fecha Inicio',
+    'Fecha Fin Programada','Plazo (días)',
+    'Monto Inicial (L)','Monto Modificado (L)','Monto Vigente (L)',
+    'Total Devengado (L)','Deuda (L)',
+    'Av. Físico (%)','Av. Financiero (%)',
+    'N° Fianza Anticipo','Ini. Fianza Anticipo','Fin Fianza Anticipo','Monto Fianza Anticipo (L)',
+    'N° Fianza Cumplimiento','Ini. Fianza Cumplimiento','Fin Fianza Cumplimiento','Monto Fianza Cumplimiento (L)',
+    'N° Fianza Calidad','Ini. Fianza Calidad','Fin Fianza Calidad','Monto Fianza Calidad (L)',
+    'Cant. Pagos','Pagos Detalle',
+    'Contratos Supervisados','Unidad'
+  ];
+
+  var detRows = todos.map(function(item) {
+    var p = item.p;
+    var esSup = p.tipoProyecto === 'supervision';
+    var nc    = esSup ? fmtS(p.noContratoSup) : fmtS(p.noContrato);
+    var emp   = esSup ? fmtS(p.supervisora)   : fmtS(p.constructora);
+    var mI    = fmtN(p.montoContratoInicial);
+    var mM    = fmtN(p.montoModificacion);
+    var vig   = mM > 0 ? mM : mI;
+    var pagos = (p.pagos || []);
+    var pagosDetalle = pagos.map(function(pg, pi) {
+      return (pi+1)+'. L '+fmtN(pg.monto).toLocaleString('es-HN')+(pg.contexto?' ('+pg.contexto+')':'');
+    }).join(' | ');
+    return [
+      fmtS(p.nProceso), nc, getAnio(p),
+      esSup ? 'Supervisión' : 'Construcción',
+      fmtS(p.proyecto), fmtS(p.descripcion),
+      fmtS(p.departamento), fmtS(p.municipio), fmtS(p.aldeaBarrio),
+      fmtS(p.latitud), fmtS(p.longitudRef), fmtS(p.longitud),
+      fmtS(p.estado), emp, fmtS(p.coordinador), fmtS(p.supervisorCampo),
+      fmtS(p.tipoSupervision),
+      fmtS(p.fechaAdjudicacion), fmtS(p.fechaContrato),
+      fmtS(p.fechaInicio), fmtS(p.fechaFinObra), fmtS(p.plazo),
+      mI, mM, vig,
+      fmtN(p.totalDevengado), fmtN(p.deuda),
+      fmtN(p.avanceFisico), fmtN(p.avanceFinanciero),
+      fmtS(p.nFianzaAnticipo), fmtS(p.iniFA), fmtS(p.finFA), fmtN(p.montoFianzaAnticipo),
+      fmtS(p.nFianzaCumplimiento), fmtS(p.iniFC), fmtS(p.finFC), fmtN(p.montoFianzaCumplimiento),
+      fmtS(p.nFianzaCalidad), fmtS(p.iniFCal), fmtS(p.finFCal), fmtN(p.montoFianzaCalidad),
+      pagos.length, pagosDetalle,
+      fmtS(p.contratosSupervisa),
+      UNIDADES[item.unidad] ? UNIDADES[item.unidad].nombre : item.unidad
+    ];
+  });
+
+  // ── Construir libro Excel ──────────────────────────────────
+  var wb = XLSX.utils.book_new();
+
+  // Hoja básica
+  var ws1 = XLSX.utils.aoa_to_sheet([basicHeaders].concat(basicRows));
+  // Estilo de ancho de columnas aproximado
+  ws1['!cols'] = [
+    {wch:20},{wch:20},{wch:6},{wch:12},{wch:55},
+    {wch:18},{wch:15},{wch:22},{wch:40},
+    {wch:22},{wch:12},{wch:15},
+    {wch:18},{wch:18},{wch:18},
+    {wch:18},{wch:18},{wch:30}
+  ];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Resumen');
+
+  // Hoja detalle
+  var ws2 = XLSX.utils.aoa_to_sheet([detHeaders].concat(detRows));
+  ws2['!cols'] = Array(detHeaders.length).fill({wch:18});
+  ws2['!cols'][4] = {wch:55}; // Proyecto
+  ws2['!cols'][5] = {wch:60}; // Descripción
+  XLSX.utils.book_append_sheet(wb, ws2, 'Detalle Completo');
+
+  // ── Nombre del archivo ─────────────────────────────────────
+  var scope   = esGlobal ? 'Global' : unidades.map(function(k){return k.toUpperCase();}).join('-');
+  var anioTag = anioSel === 'todos' ? 'TodosLosAnios' : anioSel;
+  var nombre  = 'SIT-DGCV_'+scope+'_'+anioTag+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
+
+  XLSX.writeFile(wb, nombre);
+  showToast('Excel descargado: '+nombre, 'ok');
+}
+
 
 function abrirOpcionesReporte() {
   // Construir lista de unidades para selección
