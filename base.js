@@ -1542,6 +1542,38 @@ function syncMontoModificacion() {
   hidden.value = m > 0 ? String(m) : '';
 }
 
+// ── Pagos / Estimaciones ─────────────────────────────────────
+function addPago(data) {
+  data = data || {};
+  pagoCount++;
+  var n   = pagoCount;
+  var con = document.getElementById('pagos-container');
+  if (!con) return;
+  var div = document.createElement('div');
+  div.className = 'pago-card'; div.id = 'pago-' + n;
+  div.innerHTML =
+    '<div class="pago-num">Pago / Estimación N° ' + n + '</div>' +
+    '<button class="pago-remove" title="Eliminar pago" onclick="document.getElementById(\'pago-' + n + '\').remove();recalcPagos()">✕</button>' +
+    '<div class="form-grid g2" style="margin-bottom:8px">' +
+      '<div class="form-group"><label>Monto del Pago (L)</label>' +
+        '<input type="number" class="pago-monto" value="' + (data.monto || '') + '" step="0.01" min="0" placeholder="0.00" ' +
+        'oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Fecha de Ingreso</label>' +
+        '<input type="date" class="pago-fechaIngreso" value="' + (data.fechaIngreso || data.fecha || '') + '"/></div>' +
+    '</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Período — Fecha Inicio</label>' +
+        '<input type="date" class="pago-periodoIni" value="' + (data.periodoIni || '') + '"/></div>' +
+      '<div class="form-group"><label>Período — Fecha Fin</label>' +
+        '<input type="date" class="pago-periodoFin" value="' + (data.periodoFin || '') + '"/></div>' +
+      '<div class="form-group"><label>Contexto / Descripción</label>' +
+        '<input type="text" class="pago-ctx" value="' + (data.contexto || '') + '" placeholder="Ej. Anticipo, Estimación 1…"/></div>' +
+    '</div>';
+  con.appendChild(div);
+  recalcPagos();
+}
+
+
 function recalcPagos() {
   var mI  = parseFloat((document.getElementById('f_montoContratoInicial')||{}).value) || 0;
   var mM  = getUltimoMontoMod();
@@ -2610,10 +2642,10 @@ function _generarReporteEstado(unidades, anioReporte, esGlobal) {
     '.kpi-num{font-size:26px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'+
     '.kpi-lbl{font-size:10px;color:#7B8FA0;margin-top:4px;font-weight:500;}'+
     '.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:18px;overflow:hidden;}'+
-    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:12px;font-weight:700;color:#002B6B;border-bottom:1px solid #D0DCE6;border-left:4px solid #D4A820;}'+
+    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:11px;font-weight:700;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;border-left:3px solid #D4A820;}'+
     '.section-body{padding:16px;}'+
     'table{width:100%;border-collapse:collapse;}'+
-    'th{background:#f0f4f8;padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:#7B8FA0;border-bottom:2px solid #D0DCE6;}'+
+    'th{background:#f0f4f8;padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;white-space:nowrap;}'+
     'td{border-bottom:1px solid #f0f0f0;}'+
     'tr:last-child td{border-bottom:none;}'+
     '.fin-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}'+
@@ -2707,38 +2739,15 @@ function _generarReporteProyeccion(unidades, anioReporte) {
   // ── Proyección financiera ───────────────────────────────────
   function proyectarFinanciero(p) {
     var avFin = parseFloat(p.avanceFinanciero) || 0;
-    var avFis = parseFloat(p.avanceFisico)     || 0;
     if (avFin >= 100) return 100;
-
+    // Tasa: avance financiero actual / días transcurridos desde inicio
     var fIni = p.fechaInicio ? new Date(p.fechaInicio) : null;
-    var diasTrans = (fIni && fIni < hoy) ? Math.max(1, Math.round((hoy - fIni) / 86400000)) : null;
-
-    // Caso A: ya hay avance financiero registrado → proyectar con su tasa real
-    if (avFin > 0 && diasTrans) {
-      var tasaFin = avFin / diasTrans;
-      return Math.min(100, Math.round((avFin + tasaFin * diasAlMeta) * 10) / 10);
+    if (fIni && fIni < hoy) {
+      var diasTrans = Math.max(1, Math.round((hoy - fIni) / 86400000));
+      return Math.min(100, Math.round((avFin + (avFin / diasTrans) * diasAlMeta) * 10) / 10);
     }
-
-    // Caso B: sin pagos pero con avance físico → proyectar financiero
-    // usando la tasa física con factor de desfase (pagos suelen ir ~10-15 días detrás)
-    // Estimación: avanceFinanciero ≈ avanceFísico * 0.85 (desfase típico en contratos viales)
-    if (avFis > 0) {
-      var avFinEstimado = avFis * 0.85; // Estimación actual realista
-      if (diasTrans) {
-        var tasaFisica = avFis / diasTrans;
-        // La tasa financiera estimada sigue la física con el mismo factor
-        var proyFisico = Math.min(100, avFis + tasaFisica * diasAlMeta);
-        return Math.min(100, Math.round(proyFisico * 0.85 * 10) / 10);
-      }
-      // Sin fecha inicio: escalar linealmente
-      var meses = Math.max(1, hoy.getMonth() + 1);
-      var tasaMensFis = avFis / meses;
-      var proyFisMens = Math.min(100, avFis + tasaMensFis * (diasAlMeta / 30.4));
-      return Math.min(100, Math.round(proyFisMens * 0.85 * 10) / 10);
-    }
-
-    // Caso C: sin ningún avance → proyección mínima conservadora (0%)
-    return 0;
+    var meses = Math.max(1, hoy.getMonth() + 1);
+    return Math.min(100, Math.round((avFin + (avFin / meses) * (diasAlMeta / 30.4)) * 10) / 10);
   }
 
   // ── Nivel de riesgo ─────────────────────────────────────────
@@ -2806,9 +2815,9 @@ function _generarReporteProyeccion(unidades, anioReporte) {
     '.kpi-num{font-size:26px;font-weight:300;color:#001233;font-family:monospace;line-height:1;}'+
     '.kpi-lbl{font-size:10px;color:#7B8FA0;margin-top:4px;font-weight:500;}'+
     '.section{background:#fff;border-radius:8px;border:1px solid #D0DCE6;margin-bottom:18px;overflow:hidden;}'+
-    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:12px;font-weight:700;color:#002B6B;border-bottom:1px solid #D0DCE6;border-left:4px solid #D4A820;}'+
+    '.section-title{background:#f8f9fb;padding:11px 16px;font-size:11px;font-weight:700;color:#002B6B;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid #D0DCE6;display:flex;align-items:center;gap:8px;border-left:3px solid #D4A820;}'+
     'table{width:100%;border-collapse:collapse;}'+
-    'th{background:#f0f4f8;padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:#7B8FA0;border-bottom:2px solid #D0DCE6;}'+
+    'th{background:#f0f4f8;padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:#7B8FA0;letter-spacing:.5px;text-transform:uppercase;border-bottom:2px solid #D0DCE6;white-space:nowrap;}'+
     'td{border-bottom:1px solid #f4f4f4;}tr:last-child td{border-bottom:none;}'+
     '.nota{background:#EDF5FC;border:1px solid #7DBFF0;border-radius:7px;padding:10px 14px;font-size:11px;color:#002B6B;margin-bottom:16px;line-height:1.6;}'+
     '.footer{text-align:center;font-size:10px;color:#aaa;margin-top:20px;padding:10px;border-top:1px solid #eee;}'+
