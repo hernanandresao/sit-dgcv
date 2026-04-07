@@ -1302,6 +1302,15 @@ function openDetail(u, i) {
       '</div>' +
     '</div>' +
     '<div class="dp-section"><div class="dp-section-title">Pagos ('+(p.pagos||[]).length+')</div>' + pagosHtml + '</div>' +
+    '<div class="dp-section" id="dp-fotos-'+u+'-'+i+'">' +
+      '<div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">' +
+        '<span>Fotos del Proyecto</span>' +
+        (currentUser && (currentUser.esAdmin || currentUser.esGlobalAdmin) ? '<label class="foto-upload-btn" for="foto-input-'+u+'-'+i+'" title="Subir foto"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3.5 4.5l3-3 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 10v1a1 1 0 001 1h9a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg> Subir foto</label><input type="file" id="foto-input-'+u+'-'+i+'" accept="image/*" multiple style="display:none" onchange="subirFotos(this,\''+u+'\','+i+')"/>' : '') +
+      '</div>' +
+      '<div id="fotos-grid-'+u+'-'+i+'" class="fotos-grid">' +
+        _renderFotosGrid(p) +
+      '</div>' +
+    '</div>' +
     '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>' +
     '<div style="padding:18px 0 4px;">' +
       '<button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px 20px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);">'+
@@ -1322,6 +1331,202 @@ function toggleHistDetail(id) {
   var el = document.getElementById(id);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
+
+// ═══════════════════════════════════════════════════════════
+//  FOTOS DE PROYECTO — Supabase Storage
+// ═══════════════════════════════════════════════════════════
+var STORAGE_URL = SUPA_PROJECT + '/storage/v1';
+var BUCKET      = 'fotos-proyectos';
+
+function _renderFotosGrid(p) {
+  var fotos = p.fotos || [];
+  if (!fotos.length) {
+    return '<div class="fotos-empty">Sin fotos registradas. Haga clic en "Subir foto" para agregar.</div>';
+  }
+  return fotos.map(function(f, fi) {
+    return '<div class="foto-item">' +
+      '<img src="' + f.url + '" alt="' + (f.descripcion || 'Foto') + '" class="foto-thumb" onclick="_verFoto(\''+f.url+'\',\''+encodeURIComponent(f.descripcion||'')+'\')" />' +
+      '<div class="foto-meta">' +
+        '<div class="foto-fecha">' + (f.fecha || '') + '</div>' +
+        '<div class="foto-desc">' + (f.descripcion || '') + '</div>' +
+      '</div>' +
+      (currentUser && (currentUser.esAdmin || currentUser.esGlobalAdmin) ?
+        '<button class="foto-del" onclick="eliminarFoto(event,this,\''+f.path+'\',\''+f.url+'\')" title="Eliminar">✕</button>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function _verFoto(url, desc) {
+  var decoded = decodeURIComponent(desc);
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;cursor:zoom-out;';
+  ov.onclick = function() { document.body.removeChild(ov); };
+  ov.innerHTML =
+    '<img src="'+url+'" style="max-width:90vw;max-height:80vh;border-radius:6px;box-shadow:0 8px 40px rgba(0,0,0,.5);" />' +
+    (decoded ? '<div style="color:#fff;font-size:13px;background:rgba(0,0,0,.5);padding:6px 14px;border-radius:20px;">'+decoded+'</div>' : '');
+  document.body.appendChild(ov);
+}
+
+async function subirFotos(input, u, idx) {
+  var files = Array.from(input.files);
+  if (!files.length) return;
+
+  var p = DB[u] && DB[u][idx];
+  if (!p) return;
+  var noContr = (p.noContrato || p.noContratoSup || p.nProceso || 'sin-contrato').replace(/[^a-zA-Z0-9-]/g,'_');
+
+  showToast('Subiendo ' + files.length + ' foto(s)...', 'ok');
+
+  // Pedir descripción opcional
+  var desc = prompt('Descripción de las fotos (opcional):', '') || '';
+  var fechaHoy = new Date().toISOString().slice(0, 10);
+
+  var fotos = p.fotos || [];
+  var errores = 0;
+
+  for (var fi = 0; fi < files.length; fi++) {
+    var file  = files[fi];
+    var ext   = file.name.split('.').pop().toLowerCase();
+    var path  = noContr + '/' + Date.now() + '_' + fi + '.' + ext;
+
+    // Comprimir si es mayor de 2MB
+    var blob = file;
+    if (file.size > 2 * 1024 * 1024) {
+      blob = await _comprimirImagen(file, 1200, 0.82);
+    }
+
+    try {
+      var resp = await fetch(STORAGE_URL + '/object/' + BUCKET + '/' + path, {
+        method: 'POST',
+        headers: {
+          'apikey':        SUPA_KEY,
+          'Authorization': 'Bearer ' + currentToken,
+          'Content-Type':  file.type || 'image/jpeg',
+          'x-upsert':      'true'
+        },
+        body: blob
+      });
+
+      if (resp.ok) {
+        var url = SUPA_PROJECT + '/storage/v1/object/public/' + BUCKET + '/' + path;
+        fotos.push({ url: url, path: path, descripcion: desc, fecha: fechaHoy });
+      } else {
+        var err = await resp.json().catch(function(){return {};});
+        console.error('Error subiendo foto:', err);
+        errores++;
+      }
+    } catch(e) {
+      console.error('Error subiendo foto:', e);
+      errores++;
+    }
+  }
+
+  if (fotos.length > (p.fotos || []).length) {
+    // Guardar en Supabase
+    p.fotos = fotos;
+    var ok = await _guardarFotosEnDB(u, idx, fotos);
+    if (ok) {
+      // Actualizar grid
+      var grid = document.getElementById('fotos-grid-'+u+'-'+idx);
+      if (grid) grid.innerHTML = _renderFotosGrid(p);
+      showToast((fotos.length - (errores > 0 ? errores : 0)) + ' foto(s) subida(s) correctamente.', 'ok');
+    } else {
+      showToast('Fotos subidas al storage pero error al guardar referencias. Intente de nuevo.', 'err');
+    }
+  }
+  if (errores > 0) showToast(errores + ' foto(s) no se pudieron subir.', 'err');
+
+  // Limpiar input
+  input.value = '';
+}
+
+async function _comprimirImagen(file, maxW, calidad) {
+  return new Promise(function(resolve) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var img = new Image();
+      img.onload = function() {
+        var ratio = Math.min(maxW / img.width, maxW / img.height, 1);
+        var canvas = document.createElement('canvas');
+        canvas.width  = Math.round(img.width  * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(resolve, 'image/jpeg', calidad);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function _guardarFotosEnDB(u, idx, fotos) {
+  var p   = DB[u][idx];
+  var sid = p._sid || (p.data && p.data._sid);
+  if (!sid) {
+    // Buscar el ID real en Supabase por nProceso
+    try {
+      var q = await fetch(SUPA_URL + '/proyectos?unidad=eq.'+u+'&data->>nProceso=eq.'+encodeURIComponent(p.nProceso)+'&select=id', {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
+      });
+      var rows = await q.json();
+      if (rows && rows.length) sid = rows[0].id;
+    } catch(e) { return false; }
+  }
+  if (!sid) return false;
+
+  try {
+    var newData = Object.assign({}, p, { fotos: fotos });
+    var resp = await fetch(SUPA_URL + '/proyectos?id=eq.' + sid, {
+      method:  'PATCH',
+      headers: {
+        'apikey':        SUPA_KEY,
+        'Authorization': 'Bearer ' + currentToken,
+        'Content-Type':  'application/json',
+        'Prefer':        'return=minimal'
+      },
+      body: JSON.stringify({ data: newData })
+    });
+    if (resp.ok) {
+      // Actualizar DB local
+      DB[u][idx] = newData;
+      return true;
+    }
+    return false;
+  } catch(e) { return false; }
+}
+
+async function eliminarFoto(event, btn, path, url) {
+  event.stopPropagation();
+  if (!confirm('¿Eliminar esta foto? Esta acción no se puede deshacer.')) return;
+
+  // Encontrar unidad e idx desde el grid
+  var grid   = btn.closest('.fotos-grid');
+  if (!grid) return;
+  var gridId = grid.id; // "fotos-grid-rre-3"
+  var parts  = gridId.replace('fotos-grid-','').split('-');
+  // unidad puede tener guión: reconstruir
+  var idx    = parseInt(parts[parts.length - 1]);
+  var u      = parts.slice(0, parts.length - 1).join('-');
+  var p      = DB[u] && DB[u][idx];
+  if (!p) return;
+
+  // Eliminar del storage
+  try {
+    await fetch(STORAGE_URL + '/object/' + BUCKET + '/' + path, {
+      method:  'DELETE',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
+    });
+  } catch(e) { console.warn('Error al borrar del storage:', e); }
+
+  // Eliminar de la lista local y guardar
+  p.fotos = (p.fotos || []).filter(function(f) { return f.url !== url; });
+  await _guardarFotosEnDB(u, idx, p.fotos);
+
+  // Actualizar grid
+  grid.innerHTML = _renderFotosGrid(p);
+  showToast('Foto eliminada.', 'ok');
+}
+
 
 // ═══════════════════════════════════════════════════════════
 //  FICHA DE PROYECTO — Genera documento DOCX editable
