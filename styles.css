@@ -434,6 +434,16 @@ input[list]{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3
 }
 .endoso-remove:hover{background:var(--rojo-l);color:var(--rojo);}
 
+/* ═══════════ BADGE TIPO PROYECTO ═══════════ */
+.badge-tipo{
+  display:inline-flex;align-items:center;
+  font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;
+  letter-spacing:.4px;text-transform:uppercase;
+}
+.badge-tipo.constr{background:var(--az6);color:var(--az2);}
+.badge-tipo.superv{background:var(--verde-l);color:var(--verde);}
+
+
 /* ═══════════ PAGOS DINÁMICOS ═══════════ */
 .pago-card{
   background:var(--gris6);border:1px solid var(--border);border-radius:6px;
