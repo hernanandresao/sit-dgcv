@@ -3650,8 +3650,8 @@ function renderMapaPanel() {
         (sinCoords > 0 ? ' · <span style="color:var(--gris3)">' + sinCoords + ' sin coordenadas</span>' : '') +
       '</p>' +
     '</div>' +
-    // Controles
-    '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">' +
+    // Controles — fila 1: unidad, tipo, estado, año
+    '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">' +
       '<select class="filter-select" id="mapa-filtro-unidad" onchange="actualizarMapa()" style="font-size:12px;">' +
         '<option value="">Todas las unidades</option>' +
         Object.entries(UNIDADES).map(function(e){ return '<option value="'+e[0]+'">'+e[1].nombre+'</option>'; }).join('') +
@@ -3665,7 +3665,19 @@ function renderMapaPanel() {
         '<option value="">Todos los estados</option>' +
         ESTADOS.map(function(e){ return '<option>'+e+'</option>'; }).join('') +
       '</select>' +
-      '<span id="mapa-contador" style="font-size:11px;color:var(--gris3);margin-left:4px;"></span>' +
+      '<select class="filter-select" id="mapa-filtro-anio" onchange="actualizarMapa()" style="font-size:12px;">' +
+        '<option value="">Todos los años</option>' +
+        (function(){ var y=new Date().getFullYear(); var s=''; for(var i=y;i>=2024;i--) s+='<option value="'+i+'">'+i+'</option>'; return s; })() +
+      '</select>' +
+    '</div>' +
+    // Controles — fila 2: búsqueda por contrato
+    '<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">' +
+      '<div class="search-box" style="flex:1;max-width:360px;">' +
+        '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="var(--gris3)" stroke-width="1.2"/><path d="M8 8l2.5 2.5" stroke="var(--gris3)" stroke-width="1.2" stroke-linecap="round"/></svg>' +
+        '<input type="text" id="mapa-buscar-contrato" placeholder="Buscar por N° contrato, proceso o empresa..." oninput="actualizarMapa()" style="font-size:12px;"/>' +
+      '</div>' +
+      '<button onclick="_limpiarFiltrosMapa()" style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--gris6);color:var(--gris2);cursor:pointer;font-family:var(--font);">Limpiar filtros</button>' +
+      '<span id="mapa-contador" style="font-size:11px;color:var(--gris3);"></span>' +
     '</div>' +
     // Leyenda
     '<div style="display:flex;gap:14px;margin-bottom:10px;flex-wrap:wrap;">' +
@@ -3788,9 +3800,18 @@ function _renderMarcadores(filtrados) {
 }
 
 function actualizarMapa() {
-  var filtroUnidad = (document.getElementById('mapa-filtro-unidad') || {}).value || '';
-  var filtroTipo   = (document.getElementById('mapa-filtro-tipo')   || {}).value || '';
-  var filtroEstado = (document.getElementById('mapa-filtro-estado') || {}).value || '';
+  var filtroUnidad  = (document.getElementById('mapa-filtro-unidad')  || {}).value || '';
+  var filtroTipo    = (document.getElementById('mapa-filtro-tipo')    || {}).value || '';
+  var filtroEstado  = (document.getElementById('mapa-filtro-estado')  || {}).value || '';
+  var filtroAnio    = (document.getElementById('mapa-filtro-anio')    || {}).value || '';
+  var busqueda      = ((document.getElementById('mapa-buscar-contrato') || {}).value || '').trim().toLowerCase();
+
+  // Función para inferir año del proyecto
+  function getAnio(p) {
+    if (p.anioProyecto) return String(p.anioProyecto);
+    var m = (p.nProceso || p.noContrato || p.noContratoSup || '').match(/(\d{4})$/);
+    return m ? m[1] : '';
+  }
 
   var allP = [];
   Object.keys(DB).forEach(function(unidad) {
@@ -3799,11 +3820,33 @@ function actualizarMapa() {
       if (!p.latitud || !p.longitudRef) return;
       if (filtroTipo   && (p.tipoProyecto||'construccion') !== filtroTipo)   return;
       if (filtroEstado && p.estado !== filtroEstado) return;
+      if (filtroAnio   && getAnio(p) !== filtroAnio) return;
+
+      // Búsqueda por contrato, proceso o empresa
+      if (busqueda) {
+        var esSup = p.tipoProyecto === 'supervision';
+        var nc    = (esSup ? (p.noContratoSup||'') : (p.noContrato||'')).toLowerCase();
+        var emp   = (esSup ? (p.supervisora||'')   : (p.constructora||'')).toLowerCase();
+        var np    = (p.nProceso||'').toLowerCase();
+        var proy  = (p.proyecto||'').toLowerCase();
+        if (!nc.includes(busqueda) && !np.includes(busqueda) && !emp.includes(busqueda) && !proy.includes(busqueda)) return;
+      }
+
       allP.push({ p: p, unidad: unidad });
     });
   });
 
   _renderMarcadores(allP);
+}
+
+function _limpiarFiltrosMapa() {
+  ['mapa-filtro-unidad','mapa-filtro-tipo','mapa-filtro-estado','mapa-filtro-anio'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  var buscar = document.getElementById('mapa-buscar-contrato');
+  if (buscar) buscar.value = '';
+  actualizarMapa();
 }
 
 function navegarDesdeMapaAProyecto(unidadKey, proyIdx) {
