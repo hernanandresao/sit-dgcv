@@ -1313,11 +1313,22 @@ function openDetail(u, i) {
         _renderFotosGrid(p) +
       '</div>' +
     '</div>' +
+    // ── Registros de Avance ─────────────────────────────────
+    '<div class="dp-section" id="dp-avances-'+u+'-'+i+'">' +
+      '<div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">' +
+        '<span>Registros de Avance ('+(( p.registrosAvance||[]).length)+')</span>' +
+        '<button onclick="abrirRegistroAvance(\''+u+'\','+i+')" style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--verde);background:var(--verde-l);border:1px solid #b7e4cc;padding:4px 12px;border-radius:5px;cursor:pointer;font-family:var(--font);">'+
+          '<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'+
+          'Registrar Avance'+
+        '</button>' +
+      '</div>' +
+      '<div id="avances-lista-'+u+'-'+i+'">'+_renderAvancesLista(p, u, i)+'</div>' +
+    '</div>' +
     '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>' +
-    '<div style="padding:18px 0 4px;">' +
-      '<button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px 20px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);">'+
-        '<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><rect x="2" y="1" width="9" height="12" rx="1.5" stroke="white" stroke-width="1.3"/><path d="M5 5h5M5 7.5h5M5 10h3" stroke="white" stroke-width="1.2" stroke-linecap="round"/><path d="M10 1v3h3" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'+
-        'Generar Ficha del Proyecto (DOCX)'+
+    '<div style="padding:18px 0 4px;display:flex;gap:8px;">' +
+      '<button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="display:flex;align-items:center;justify-content:center;gap:8px;flex:1;padding:11px 16px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);">'+
+        '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="2" y="1" width="7" height="11" rx="1" stroke="white" stroke-width="1.2"/><path d="M4 4.5h4M4 6.5h4M4 8.5h2.5" stroke="white" stroke-width="1.1" stroke-linecap="round"/><path d="M8 1v2.5h2.5" stroke="white" stroke-width="1.1" stroke-linecap="round"/></svg>'+
+        'Ficha del Proyecto'+
       '</button>' +
     '</div>';
 
@@ -1333,6 +1344,401 @@ function toggleHistDetail(id) {
   var el = document.getElementById(id);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
+
+// ═══════════════════════════════════════════════════════════
+//  REGISTROS DE AVANCE SEMANAL
+// ═══════════════════════════════════════════════════════════
+
+function _renderAvancesLista(p, u, idx) {
+  var registros = (p.registrosAvance || []).slice().reverse(); // más recientes primero
+  if (!registros.length) {
+    return '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:12px 0;">Sin registros de avance. Use el botón para crear el primero.</div>';
+  }
+  return registros.map(function(r, ri) {
+    var rIdx = (p.registrosAvance.length - 1) - ri; // índice real en el array
+    var fotos = r.fotos || [];
+    return '<div class="avance-registro">' +
+      '<div class="avance-registro-header">' +
+        '<div>' +
+          '<span class="avance-registro-fecha">' + (r.fechaCorte || r.fecha || '—') + '</span>' +
+          '<span class="avance-registro-autor"> · ' + (r.registradoPor || '') + '</span>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span class="avance-fis-badge">Fís: ' + parseFloat(r.avanceFisico||0).toFixed(1) + '%</span>' +
+          (r.avanceFinanciero ? '<span class="avance-fin-badge">Fin: ' + parseFloat(r.avanceFinanciero).toFixed(1) + '%</span>' : '') +
+          '<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" title="Generar reporte de este avance" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>' +
+        '</div>' +
+      '</div>' +
+      (r.observaciones ? '<div class="avance-registro-obs">' + r.observaciones + '</div>' : '') +
+      (fotos.length ? '<div class="fotos-grid avance-fotos">' + fotos.map(function(f, fi) {
+        return '<div class="foto-item"><img src="' + f.url + '" class="foto-thumb" onclick="_verFoto(\''+f.url+'\',\''+encodeURIComponent(f.descripcion||'')+'\')"/><div class="foto-meta"><div class="foto-desc">' + (f.descripcion||'') + '</div></div></div>';
+      }).join('') + '</div>' : '') +
+    '</div>';
+  }).join('');
+}
+
+// Modal de Registro de Avance
+function abrirRegistroAvance(u, idx) {
+  var p = DB[u] && DB[u][idx];
+  if (!p) return;
+  var esSup = p.tipoProyecto === 'supervision';
+  var nc = esSup ? (p.noContratoSup||'—') : (p.noContrato||'—');
+  var hoy = new Date().toISOString().slice(0,10);
+  var afActual = parseFloat(p.avanceFisico) || 0;
+  var afinActual = parseFloat(p.avanceFinanciero) || 0;
+
+  document.getElementById('modalTitle').textContent = 'Registrar Avance — ' + nc;
+  document.getElementById('modalBody').innerHTML =
+    '<div style="font-size:11px;color:var(--gris3);margin-bottom:14px;">'+
+      'Proyecto: <strong style="color:var(--az1);">' + (p.proyecto||'').slice(0,70) + '</strong>'+
+    '</div>' +
+
+    '<div class="form-grid g2" style="margin-bottom:12px;">' +
+      '<div class="form-group"><label>Fecha de Corte <span class="req">*</span></label>' +
+        '<input type="date" id="av-fecha" value="'+hoy+'"/></div>' +
+      '<div class="form-group"><label>Avance Físico (%) <span class="req">*</span></label>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<input type="number" id="av-fisico" value="'+afActual.toFixed(1)+'" min="0" max="100" step="0.1" style="width:100px;" ' +
+            'oninput="this.value=Math.min(100,Math.max(0,parseFloat(this.value)||0));_avBarUpdate()"/>' +
+          '<div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden">' +
+            '<div id="av-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+Math.min(afActual,100)+'%"></div>' +
+          '</div>' +
+          '<span id="av-bar-lbl" style="font-size:11px;font-family:var(--mono);color:var(--az2);width:38px;text-align:right">'+afActual.toFixed(1)+'%</span>' +
+        '</div></div>' +
+    '</div>' +
+
+    '<div class="form-grid g2" style="margin-bottom:12px;">' +
+      '<div class="form-group"><label>Avance Financiero (%) <span style="font-size:10px;color:var(--gris3)">(opcional)</span></label>' +
+        '<input type="number" id="av-financiero" value="'+afinActual.toFixed(1)+'" min="0" max="100" step="0.1" placeholder="0.0"/></div>' +
+      '<div class="form-group"></div>' +
+    '</div>' +
+
+    '<div class="form-group" style="margin-bottom:12px;"><label>Observaciones / Descripción del Avance</label>' +
+      '<textarea id="av-obs" rows="3" placeholder="Descripción de las actividades realizadas en el período..." style="width:100%;border:1px solid var(--border);border-radius:6px;padding:8px 11px;font-size:12px;font-family:var(--font);resize:vertical;outline:none;"></textarea>' +
+    '</div>' +
+
+    '<div class="form-group">' +
+      '<label>Fotos de este avance</label>' +
+      '<div id="av-fotos-preview" class="fotos-grid" style="min-height:50px;background:var(--gris6);border-radius:6px;border:1px dashed var(--border);padding:8px;margin-bottom:8px;">' +
+        '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:8px;">Sin fotos seleccionadas</div>' +
+      '</div>' +
+      '<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--az2);font-weight:600;padding:6px 14px;border:1px solid var(--az5);border-radius:6px;background:var(--az7);">' +
+        '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3.5 4.5l3-3 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 10v1a1 1 0 001 1h9a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>' +
+        'Seleccionar fotos...' +
+        '<input type="file" id="av-fotos-input" accept="image/*" multiple style="display:none" onchange="_avFotosPreview(this)"/>' +
+      '</label>' +
+    '</div>';
+
+  // Guardar referencia al proyecto actual
+  window._avEditRef = { u: u, idx: idx };
+
+  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+  if (btnGuardar) {
+    btnGuardar.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 7l3.5 3.5L11 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> Guardar Avance';
+    btnGuardar.onclick = _guardarRegistroAvance;
+    btnGuardar.style.display = '';
+  }
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function _avBarUpdate() {
+  var v = parseFloat(document.getElementById('av-fisico').value) || 0;
+  var bar = document.getElementById('av-bar');
+  var lbl = document.getElementById('av-bar-lbl');
+  if (bar) bar.style.width = Math.min(v,100) + '%';
+  if (lbl) lbl.textContent = v.toFixed(1) + '%';
+}
+
+// Preview de fotos seleccionadas (antes de subir)
+var _avFotosSeleccionadas = [];
+function _avFotosPreview(input) {
+  _avFotosSeleccionadas = Array.from(input.files);
+  var preview = document.getElementById('av-fotos-preview');
+  if (!preview) return;
+  if (!_avFotosSeleccionadas.length) {
+    preview.innerHTML = '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:8px;">Sin fotos seleccionadas</div>';
+    return;
+  }
+  preview.innerHTML = '';
+  _avFotosSeleccionadas.forEach(function(file) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var div = document.createElement('div');
+      div.className = 'foto-item';
+      div.innerHTML = '<img src="'+e.target.result+'" class="foto-thumb" style="height:80px;"/>' +
+        '<div class="foto-meta"><div class="foto-desc">'+file.name.slice(0,20)+'</div></div>';
+      preview.appendChild(div);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function _guardarRegistroAvance() {
+  var ref = window._avEditRef;
+  if (!ref) return;
+  var u   = ref.u;
+  var idx = ref.idx;
+  var p   = DB[u] && DB[u][idx];
+  if (!p) return;
+
+  var fecha   = (document.getElementById('av-fecha')      || {}).value || '';
+  var avFis   = parseFloat((document.getElementById('av-fisico')      || {}).value) || 0;
+  var avFin   = parseFloat((document.getElementById('av-financiero')  || {}).value) || 0;
+  var obs     = (document.getElementById('av-obs')        || {}).value || '';
+
+  if (!fecha)       { showToast('Indique la fecha de corte.', 'err'); return; }
+  if (avFis <= 0)   { showToast('El avance físico debe ser mayor a 0.', 'err'); return; }
+
+  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+  if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...'; }
+
+  // Subir fotos del avance
+  var esSup   = p.tipoProyecto === 'supervision';
+  var noContr = (esSup ? (p.noContratoSup||'') : (p.noContrato||'')) || p.nProceso || 'sin-id';
+  noContr     = noContr.replace(/[^a-zA-Z0-9-]/g,'_');
+  var fechaTag= fecha.replace(/-/g,'');
+  var fotosSubidas = [];
+
+  for (var fi = 0; fi < _avFotosSeleccionadas.length; fi++) {
+    var file  = _avFotosSeleccionadas[fi];
+    var ext   = file.name.split('.').pop().toLowerCase() || 'jpg';
+    var path  = 'avances/' + noContr + '/' + fechaTag + '_' + fi + '.' + ext;
+    var blob  = file.size > 2*1024*1024 ? await _comprimirImagen(file, 1200, 0.82) : file;
+    try {
+      var resp = await fetch(STORAGE_URL + '/object/' + BUCKET + '/' + path, {
+        method:  'POST',
+        headers: { 'apikey':SUPA_KEY, 'Authorization':'Bearer '+currentToken,
+                   'Content-Type':file.type||'image/jpeg', 'x-upsert':'true' },
+        body: blob
+      });
+      if (resp.ok) {
+        var url = SUPA_PROJECT + '/storage/v1/object/public/' + BUCKET + '/' + path;
+        fotosSubidas.push({ url:url, path:path, descripcion:'Avance '+fecha });
+      }
+    } catch(e) { console.warn('Error subiendo foto de avance:', e); }
+  }
+
+  // Crear registro
+  var nuevoRegistro = {
+    id:              Date.now(),
+    fechaCorte:      fecha,
+    avanceFisico:    avFis,
+    avanceFinanciero:avFin || null,
+    observaciones:   obs,
+    fotos:           fotosSubidas,
+    registradoPor:   currentUser ? (currentUser.nombre || currentUser.email) : 'Usuario',
+    creadoEn:        new Date().toISOString()
+  };
+
+  var registros = p.registrosAvance || [];
+  registros.push(nuevoRegistro);
+
+  // Actualizar avance físico del proyecto con el último registro
+  var afAnterior = parseFloat(p.avanceFisico) || 0;
+  p.registrosAvance = registros;
+  p.avanceFisico    = String(avFis);
+  if (avFin > 0) p.avanceFinanciero = String(avFin);
+
+  var ok = await _guardarFotosEnDB(u, idx, p.fotos || []);  // reutiliza la función existente pero guarda todo el data
+  // En realidad necesitamos guardar todo el proyecto actualizado:
+  var sid = p._sid || (p.data && p.data._sid);
+  if (!sid) {
+    try {
+      var q = await fetch(SUPA_URL+'/proyectos?unidad=eq.'+u+'&data->>nProceso=eq.'+encodeURIComponent(p.nProceso)+'&select=id',
+        { headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken} });
+      var rows = await q.json();
+      if (rows && rows.length) sid = rows[0].id;
+    } catch(e) {}
+  }
+
+  var guardado = false;
+  if (sid) {
+    try {
+      var newData = Object.assign({}, p);
+      var pResp = await fetch(SUPA_URL+'/proyectos?id=eq.'+sid, {
+        method: 'PATCH',
+        headers: {'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,
+                  'Content-Type':'application/json','Prefer':'return=minimal'},
+        body: JSON.stringify({
+          data:              newData,
+          avance_fisico:     avFis,
+          avance_financiero: avFin > 0 ? avFin : undefined
+        })
+      });
+      guardado = pResp.ok;
+      if (pResp.ok) DB[u][idx] = newData;
+    } catch(e) {}
+  }
+
+  closeModal();
+  _avFotosSeleccionadas = [];
+
+  if (guardado) {
+    showToast('Avance registrado correctamente.', 'ok');
+    // Actualizar lista de avances en el panel
+    var listaEl = document.getElementById('avances-lista-'+u+'-'+idx);
+    if (listaEl) listaEl.innerHTML = _renderAvancesLista(p, u, idx);
+    // Actualizar título de sección
+    var secEl = document.getElementById('dp-avances-'+u+'-'+idx);
+    if (secEl) {
+      var title = secEl.querySelector('.dp-section-title span');
+      if (title) title.textContent = 'Registros de Avance (' + registros.length + ')';
+    }
+  } else {
+    showToast('Error al guardar. Intente de nuevo.', 'err');
+  }
+
+  // Restaurar botón guardar
+  var btnGuardar2 = document.querySelector('.modal-footer .btn-primary');
+  if (btnGuardar2) { btnGuardar2.disabled = false; btnGuardar2.onclick = saveProject; }
+}
+
+// Reporte HTML de un registro de avance específico
+function generarReporteAvance(u, idx, registroIdx) {
+  var p = DB[u] && DB[u][idx];
+  if (!p) return;
+  var r = p.registrosAvance && p.registrosAvance[registroIdx];
+  if (!r) return;
+
+  var esSup   = p.tipoProyecto === 'supervision';
+  var noContr = esSup ? (p.noContratoSup||'—') : (p.noContrato||'—');
+  var empresa = esSup ? (p.supervisora||'—')   : (p.constructora||'—');
+  var unidNombre = UNIDADES[u] ? UNIDADES[u].nombre : u;
+  var fechaGen = new Date().toLocaleDateString('es-HN', {day:'2-digit',month:'long',year:'numeric'});
+  var afAnt   = 0; // avance anterior (registro previo si existe)
+  if (registroIdx > 0 && p.registrosAvance[registroIdx-1]) {
+    afAnt = parseFloat(p.registrosAvance[registroIdx-1].avanceFisico) || 0;
+  }
+  var afActual = parseFloat(r.avanceFisico) || 0;
+  var afinActual = parseFloat(r.avanceFinanciero) || 0;
+  var mI = parseFloat(p.montoContratoInicial)||0;
+  var mM = parseFloat(p.montoModificacion)||0;
+  var vig= mM>0?mM:mI;
+  function fmtL(n){ var v=parseFloat(n); return isNaN(v)?'—':'L '+v.toLocaleString('es-HN',{minimumFractionDigits:2}); }
+
+  // Fotos del avance
+  var fotosHtml = (r.fotos||[]).map(function(f, fi) {
+    return '<div style="break-inside:avoid">' +
+      '<img src="'+f.url+'" style="width:100%;height:160px;object-fit:cover;border-radius:6px;border:1px solid #D0DCE6;"/>' +
+      '<div style="font-size:8pt;color:#7B8FA0;text-align:center;margin-top:4px;">'+(f.descripcion||'Foto '+(fi+1))+'</div>' +
+    '</div>';
+  }).join('');
+
+  function svgBar(pct, color) {
+    var w = Math.min(Math.max(pct,0),100)*2;
+    return '<svg width="100%" height="18" viewBox="0 0 300 18" preserveAspectRatio="none">'+
+      '<rect width="300" height="18" rx="9" fill="#e8ecf0"/>'+
+      '<rect width="'+w*1.5+'" height="18" rx="9" fill="'+color+'"/>'+
+      '<text x="150" y="13" text-anchor="middle" font-size="10" fill="white" font-family="Arial" font-weight="bold">'+pct.toFixed(1)+'%</text>'+
+    '</svg>';
+  }
+
+  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>'+
+  '<title>Reporte de Avance — '+noContr+' — '+r.fechaCorte+'</title>'+
+  '<style>'+
+  'body{font-family:Arial,sans-serif;color:#1C2B3A;font-size:11pt;margin:0;}'+
+  '.page{max-width:750px;margin:0 auto;padding:24px 32px;}'+
+  '.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:0;border-bottom:4px solid #D4A820;display:flex;}'+
+  '.hl{padding:18px 22px;flex:1;}'+'.hr{padding:18px 22px;text-align:right;min-width:160px;}'+
+  '.inst{font-size:8pt;opacity:.7;margin-bottom:1px;}'+
+  '.doc-title{font-size:15pt;font-weight:700;margin:3px 0 2px;}'+
+  '.periodo-badge{display:inline-block;background:rgba(13,122,78,.4);color:#2ecc71;font-size:8pt;font-weight:700;padding:2px 10px;border-radius:10px;}'+
+  '.nc{font-size:12pt;font-weight:700;font-family:monospace;}'+
+  '.section{margin:16px 0 0;}'+
+  '.sec-t{font-size:9pt;font-weight:700;color:#002B6B;padding:6px 12px;background:#EDF5FC;border-left:4px solid #D4A820;margin-bottom:0;}'+
+  '.sec-b{border:1px solid #D0DCE6;border-top:none;padding:12px 16px;}'+
+  '.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}'+
+  '.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}'+
+  '.lbl{font-size:8pt;color:#7B8FA0;font-weight:600;text-transform:uppercase;margin-bottom:2px;}'+
+  '.val{font-size:10pt;color:#1C2B3A;font-weight:500;}'+
+  '.kpi{text-align:center;background:#f8f9fb;border-radius:6px;padding:10px 8px;border:1px solid #e0e8f0;}'+
+  '.kpi-l{font-size:8pt;color:#7B8FA0;margin-bottom:3px;}'+
+  '.kpi-v{font-size:13pt;font-weight:700;font-family:monospace;}'+
+  '.delta{font-size:9pt;font-weight:600;text-align:center;margin-top:4px;}'+
+  '.obs{font-size:10pt;color:#1C2B3A;line-height:1.6;background:#f8f9fb;border-radius:6px;padding:10px 14px;border-left:3px solid #D4A820;}'+
+  'table{width:100%;border-collapse:collapse;font-size:9pt;}'+
+  'th{background:#f0f4f8;padding:6px 10px;text-align:left;font-size:8pt;color:#7B8FA0;font-weight:700;border-bottom:2px solid #D0DCE6;}'+
+  'td{padding:6px 10px;border-bottom:1px solid #f0f0f0;}'+
+  'tr:last-child td{border-bottom:none;}'+
+  '.footer{text-align:center;font-size:8pt;color:#aaa;margin-top:20px;padding-top:10px;border-top:1px solid #eee;}'+
+  '@media print{body{margin:0;}@page{margin:12mm 10mm;size:A4;} .section{page-break-inside:avoid;} img{page-break-inside:avoid;}}'+
+  '</style></head><body><div class="page">'+
+
+  '<div class="header">'+
+    '<div class="hl">'+
+      '<div class="inst">República de Honduras · Secretaría de Infraestructura y Transporte</div>'+
+      '<div class="inst">Dirección General de Conservación Vial — DGCV</div>'+
+      '<div class="doc-title">Reporte de Avance Semanal</div>'+
+      '<div class="periodo-badge">Corte: '+r.fechaCorte+'</div>'+
+    '</div>'+
+    '<div class="hr">'+
+      '<div style="font-size:8pt;opacity:.7;">Generado el</div>'+
+      '<div style="font-size:9pt;font-weight:600;">'+fechaGen+'</div>'+
+      '<div class="nc" style="margin-top:8px;">'+noContr+'</div>'+
+      '<div style="font-size:8pt;opacity:.7;margin-top:4px;">'+unidNombre.replace('Respuesta Rápida a Emergencias','Resp. Rápida')+'</div>'+
+    '</div>'+
+  '</div>'+
+
+  // Identificación
+  '<div class="section"><div class="sec-t">Identificación</div><div class="sec-b">'+
+    '<div class="g2">'+
+      '<div><div class="lbl">Proyecto</div><div class="val" style="font-size:10pt;">'+p.proyecto+'</div></div>'+
+      '<div><div class="lbl">Empresa</div><div class="val">'+empresa+'</div></div>'+
+      '<div><div class="lbl">Coordinador</div><div class="val">'+(p.coordinador||'—')+'</div></div>'+
+      '<div><div class="lbl">Registrado por</div><div class="val">'+r.registradoPor+'</div></div>'+
+    '</div>'+
+  '</div></div>'+
+
+  // KPIs de avance
+  '<div class="section"><div class="sec-t">Avance al '+r.fechaCorte+'</div><div class="sec-b">'+
+    '<div class="g3" style="margin-bottom:14px;">'+
+      '<div class="kpi"><div class="kpi-l">Avance Físico</div><div class="kpi-v" style="color:#1268C4;">'+afActual.toFixed(1)+'%</div>'+
+        (registroIdx>0?'<div class="delta" style="color:'+(afActual-afAnt>=0?'#0D7A4E':'#C0392B')+'">'+(afActual-afAnt>=0?'▲':'▼')+' '+Math.abs(afActual-afAnt).toFixed(1)+'% vs período ant.</div>':'')+
+      '</div>'+
+      (afinActual>0?'<div class="kpi"><div class="kpi-l">Avance Financiero</div><div class="kpi-v" style="color:#0D7A4E;">'+afinActual.toFixed(1)+'%</div></div>':'<div></div>')+
+      '<div class="kpi"><div class="kpi-l">Monto Vigente</div><div class="kpi-v" style="color:#001233;font-size:11pt;">'+fmtL(vig)+'</div></div>'+
+    '</div>'+
+    '<div style="margin-bottom:8px;"><div class="lbl" style="margin-bottom:4px;">Avance Físico</div>'+svgBar(afActual,'#1268C4')+'</div>'+
+    (afinActual>0?'<div><div class="lbl" style="margin-bottom:4px;">Avance Financiero</div>'+svgBar(afinActual,'#0D7A4E')+'</div>':'')+
+  '</div></div>'+
+
+  // Observaciones
+  (r.observaciones?
+  '<div class="section"><div class="sec-t">Observaciones y Actividades del Período</div><div class="sec-b">'+
+    '<div class="obs">'+r.observaciones+'</div>'+
+  '</div></div>':'') +
+
+  // Historial de avances anteriores
+  (p.registrosAvance && p.registrosAvance.length > 1 ?
+  '<div class="section"><div class="sec-t">Evolución del Avance</div><div class="sec-b" style="padding:0;overflow:auto;">'+
+    '<table><thead><tr><th>#</th><th>Fecha de Corte</th><th>Av. Físico</th><th>Av. Financiero</th><th>Registrado por</th></tr></thead>'+
+    '<tbody>'+p.registrosAvance.map(function(reg, ri) {
+      var esActual = ri === registroIdx;
+      return '<tr style="'+(esActual?'background:#EDF5FC;font-weight:700;':'')+'">'  +
+        '<td>'+(ri+1)+'</td>'+
+        '<td>'+reg.fechaCorte+'</td>'+
+        '<td style="font-family:monospace;color:#1268C4;">'+parseFloat(reg.avanceFisico||0).toFixed(1)+'%</td>'+
+        '<td style="font-family:monospace;color:#0D7A4E;">'+(reg.avanceFinanciero?parseFloat(reg.avanceFinanciero).toFixed(1)+'%':'—')+'</td>'+
+        '<td>'+reg.registradoPor+'</td>'+
+      '</tr>';
+    }).join('')+
+    '</tbody></table>'+
+  '</div></div>' : '') +
+
+  // Fotos
+  (fotosHtml ?
+  '<div class="section"><div class="sec-t">Registro Fotográfico ('+( r.fotos||[]).length+' foto'+((r.fotos||[]).length!==1?'s':'')+') </div>'+
+    '<div class="sec-b"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">'+fotosHtml+'</div></div></div>' : '')+
+
+  '<div class="footer">DGCV · Reporte de Avance Semanal · '+r.fechaCorte+' · Generado el '+fechaGen+'</div>'+
+  '</div></body></html>';
+
+  var win = window.open('','_blank');
+  win.document.write(html);
+  win.document.close();
+  win.document.title = 'Avance_'+noContr+'_'+r.fechaCorte;
+}
+
 
 // ═══════════════════════════════════════════════════════════
 //  FOTOS DE PROYECTO — Supabase Storage
