@@ -330,6 +330,51 @@ function selectTipoProyecto(tipo) {
   recalcPagos();
 }
 
+function _filtrarContratosSup(q) {
+  var dropdown = document.getElementById('sup-dropdown');
+  if (!dropdown) return;
+  var qL = (q || '').toLowerCase().trim();
+  var filtrados = qL
+    ? contratosSupervision.filter(function(s) {
+        return (s.noContratoSup || '').toLowerCase().includes(qL) ||
+               (s.supervisora   || '').toLowerCase().includes(qL) ||
+               (s.nProceso      || '').toLowerCase().includes(qL);
+      })
+    : contratosSupervision;
+
+  if (!filtrados.length) {
+    dropdown.innerHTML = '<div style="padding:10px 12px;font-size:11px;color:var(--gris3);">Sin resultados</div>';
+    dropdown.style.display = 'block';
+    return;
+  }
+
+  dropdown.innerHTML = filtrados.map(function(s) {
+    var unidLbl = UNIDADES[s._unidad] ? UNIDADES[s._unidad].nombre.split(' ').slice(0,2).join(' ') : s._unidad;
+    var lbl = (s.supervisora || '?') + ' — ' + (s.noContratoSup || 'S/N') + ' (' + unidLbl + ')';
+    return '<div data-sid="'+(s._sid||'')+'" data-lbl="'+lbl.replace(/"/g,'&quot;')+'" ' +
+      'onmousedown="_selContratoSup(this)" ' +
+      'style="padding:8px 12px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--gris6);" ' +
+      'onmouseover="this.style.background=\"#EDF5FC\"" onmouseout="this.style.background=\"\"">' +
+      lbl + '</div>';
+  }).join('');
+  dropdown.style.display = 'block';
+}
+
+function _selContratoSup(item) {
+  var sid = item.getAttribute('data-sid');
+  var lbl = item.getAttribute('data-lbl');
+  var inp = document.getElementById('f_supBuscar');
+  var hid = document.getElementById('f_contratoSupervisionId');
+  var drop = document.getElementById('sup-dropdown');
+  if (inp) inp.value = lbl;
+  if (hid) hid.value = sid;
+  if (drop) drop.style.display = 'none';
+  // Disparar la lógica de selección existente
+  var fakeSelect = { value: sid };
+  onSelectContratoSupervision(fakeSelect);
+}
+
+
 function onSelectContratoSupervision(sel) {
   var sid    = sel.value;
   var infoEl = document.getElementById('sup-ext-info');
@@ -414,7 +459,13 @@ function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
     '<div id="sup-ext-fields">' +
       (haySupContratos
         ? '<div class="form-group"><label>Contrato de Supervisión <span class="req">*</span></label>' +
-            '<select id="f_contratoSupervisionId" onchange="onSelectContratoSupervision(this)" style="width:100%">'+supOpts+'</select></div>' +
+            '<div style="position:relative">' +
+              '<input type="text" id="f_supBuscar" placeholder="Escriba N° contrato, empresa o proceso..." autocomplete="off"' +
+                ' style="width:100%;padding-right:30px"' +
+                ' oninput="_filtrarContratosSup(this.value)" onfocus="_filtrarContratosSup(this.value)" onblur="setTimeout(function(){var d=document.getElementById(\'sup-dropdown\');if(d)d.style.display=\'none\';},200)"/>' +
+              '<div id="sup-dropdown" style="display:none;position:absolute;z-index:300;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);"></div>' +
+            '</div>' +
+            '<input type="hidden" id="f_contratoSupervisionId" value=""/>' +
             '<div id="sup-ext-info" style="margin-top:8px;display:none"></div>'
         : '<div style="background:var(--amarillo-l);border:1px solid #d4a500;border-radius:6px;padding:10px 14px;font-size:11px;color:var(--amarillo);">' +
             '<strong>Sin contratos de supervisión registrados.</strong> Para asignar supervisión externa, primero registre un contrato de supervisión.' +
@@ -2349,6 +2400,15 @@ function openForm(u, idx) {
     var selSup = document.getElementById('f_contratoSupervisionId');
     if (selSup && p.contratoSupervisionId) {
       selSup.value = p.contratoSupervisionId;
+      // Populate the search text input if using the new search UI
+      var supBuscar = document.getElementById('f_supBuscar');
+      if (supBuscar) {
+        var supObj = contratosSupervision.find(function(s){ return s._sid === p.contratoSupervisionId; });
+        if (supObj) {
+          var unidLbl = UNIDADES[supObj._unidad] ? UNIDADES[supObj._unidad].nombre.split(' ').slice(0,2).join(' ') : supObj._unidad;
+          supBuscar.value = (supObj.supervisora||'?')+' — '+(supObj.noContratoSup||'S/N')+' ('+unidLbl+')';
+        }
+      }
       onSelectContratoSupervision(selSup);
     }
   }
@@ -2877,12 +2937,21 @@ function deleteProject(u, i) {
 //  MODALES — CERRAR
 // ═══════════════════════════════════════════════════════════
 function closeModal(e) {
-  if (e && e.target !== document.getElementById('modalOverlay')) return;
+  // Solo cerrar si e es undefined (llamada programática o X) — nunca por click en overlay
+  if (e && e.target) return;
   document.getElementById('modalOverlay').classList.remove('open');
   editingId = null; endosoCount = 0; pagoCount = 0; modCount = 0;
+  // Restaurar siempre el botón guardar a su estado original
+  var btnG = document.querySelector('.modal-footer .btn-primary');
+  if (btnG) {
+    btnG.disabled = false;
+    btnG.onclick  = saveProject;
+    btnG.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 7l3 3 7-6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Guardar';
+  }
 }
 function closeDetail(e) {
-  if (e && e.target !== document.getElementById('detailOverlay')) return;
+  // Solo cerrar si e es undefined (llamada programática o X) — nunca por click en overlay
+  if (e && e.target) return;
   document.getElementById('detailOverlay').classList.remove('open');
 }
 
