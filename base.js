@@ -1397,6 +1397,9 @@ function _renderAvancesLista(p, u, idx) {
           (km > 0 ? '<span style="font-size:10px;font-weight:600;color:var(--verde);background:var(--verde-l);padding:2px 8px;border-radius:8px;">' + km.toFixed(2) + ' km</span>' : '') +
           (kmAcum > 0 ? '<span style="font-size:9px;color:var(--gris3);">acum: ' + kmAcum.toFixed(2) + ' km</span>' : '') +
           '<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>' +
+          (currentUser && (currentUser.esAdmin || currentUser.esGlobalAdmin) ?
+            '<button onclick="eliminarRegistroAvance(\''+u+'\','+idx+','+rIdx+')" title="Eliminar este registro" style="background:none;border:1px solid var(--rojo-l);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--rojo);cursor:pointer;font-family:var(--font);">✕ Borrar</button>'
+          : '') +
         '</div>' +
       '</div>' +
       (r.observaciones ? '<div class="avance-registro-obs">' + r.observaciones + '</div>' : '') +
@@ -1632,6 +1635,71 @@ async function _guardarRegistroAvance() {
 }
 
 // Reporte HTML de un registro de avance específico
+async function eliminarRegistroAvance(u, idx, registroIdx) {
+  if (!confirm('¿Eliminar este registro de avance? Esta acción no se puede deshacer.')) return;
+
+  var p = DB[u] && DB[u][idx];
+  if (!p || !p.registrosAvance) return;
+
+  var registro = p.registrosAvance[registroIdx];
+  if (!registro) return;
+
+  // Eliminar fotos del storage si las tiene
+  var fotos = registro.fotos || [];
+  for (var fi = 0; fi < fotos.length; fi++) {
+    try {
+      await fetch(STORAGE_URL + '/object/' + BUCKET + '/' + fotos[fi].path, {
+        method: 'DELETE',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
+      });
+    } catch(e) { console.warn('Error borrando foto:', e); }
+  }
+
+  // Eliminar del array
+  p.registrosAvance.splice(registroIdx, 1);
+
+  // Si quedan registros, actualizar avance físico al del último; si no, conservar el actual
+  if (p.registrosAvance.length > 0) {
+    var ultimo = p.registrosAvance[p.registrosAvance.length - 1];
+    p.avanceFisico = String(parseFloat(ultimo.avanceFisico) || 0);
+  }
+
+  // Guardar en Supabase
+  var sid = p._sid || (p.data && p.data._sid);
+  if (!sid) {
+    try {
+      var q = await fetch(SUPA_URL+'/proyectos?unidad=eq.'+u+'&data->>nProceso=eq.'+encodeURIComponent(p.nProceso)+'&select=id',
+        { headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken } });
+      var rows = await q.json();
+      if (rows && rows.length) sid = rows[0].id;
+    } catch(e) {}
+  }
+
+  if (sid) {
+    try {
+      var newData = Object.assign({}, p);
+      await fetch(SUPA_URL + '/proyectos?id=eq.' + sid, {
+        method: 'PATCH',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken,
+                   'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ data: newData, avance_fisico: parseFloat(p.avanceFisico) || 0 })
+      });
+      DB[u][idx] = newData;
+    } catch(e) { showToast('Error al guardar cambios.', 'err'); return; }
+  }
+
+  // Actualizar vista
+  var listaEl = document.getElementById('avances-lista-' + u + '-' + idx);
+  if (listaEl) listaEl.innerHTML = _renderAvancesLista(p, u, idx);
+  var secEl = document.getElementById('dp-avances-' + u + '-' + idx);
+  if (secEl) {
+    var title = secEl.querySelector('.dp-section-title span');
+    if (title) title.textContent = 'Registros de Avance (' + p.registrosAvance.length + ')';
+  }
+  showToast('Registro eliminado.', 'ok');
+}
+
+
 function generarReporteAvance(u, idx, registroIdx) {
   var p = DB[u] && DB[u][idx];
   if (!p) return;
