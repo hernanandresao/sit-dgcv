@@ -1350,31 +1350,64 @@ function toggleHistDetail(id) {
 // ═══════════════════════════════════════════════════════════
 
 function _renderAvancesLista(p, u, idx) {
-  var registros = (p.registrosAvance || []).slice().reverse(); // más recientes primero
+  var registros = (p.registrosAvance || []);
   if (!registros.length) {
     return '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:12px 0;">Sin registros de avance. Use el botón para crear el primero.</div>';
   }
-  return registros.map(function(r, ri) {
-    var rIdx = (p.registrosAvance.length - 1) - ri; // índice real en el array
+
+  // Totales acumulados
+  var totalKm  = registros.reduce(function(a, r) { return a + (parseFloat(r.kmIntervenidos) || 0); }, 0);
+  var lastAf   = parseFloat(registros[registros.length - 1].avanceFisico) || 0;
+  var kmTotal  = parseFloat(p.longitud) || 0;
+
+  var totalBanner =
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">' +
+      '<div style="text-align:center;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:8px 6px;">' +
+        '<div style="font-size:9px;color:var(--az2);font-weight:600;text-transform:uppercase;margin-bottom:2px;">Registros</div>' +
+        '<div style="font-size:16px;font-weight:300;color:var(--az1);font-family:var(--mono);">' + registros.length + '</div>' +
+      '</div>' +
+      '<div style="text-align:center;background:var(--verde-l);border:1px solid #b7e4cc;border-radius:6px;padding:8px 6px;">' +
+        '<div style="font-size:9px;color:var(--verde);font-weight:600;text-transform:uppercase;margin-bottom:2px;">KM acumulados</div>' +
+        '<div style="font-size:16px;font-weight:300;color:var(--verde);font-family:var(--mono);">' + totalKm.toFixed(2) + (kmTotal > 0 ? ' / ' + kmTotal.toFixed(2) : '') + '</div>' +
+      '</div>' +
+      '<div style="text-align:center;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:8px 6px;">' +
+        '<div style="font-size:9px;color:var(--az2);font-weight:600;text-transform:uppercase;margin-bottom:2px;">Avance actual</div>' +
+        '<div style="font-size:16px;font-weight:300;color:var(--az2);font-family:var(--mono);">' + lastAf.toFixed(1) + '%</div>' +
+      '</div>' +
+    '</div>';
+
+  var listaHtml = registros.slice().reverse().map(function(r, ri) {
+    var rIdx = (registros.length - 1) - ri;
     var fotos = r.fotos || [];
+    var km    = parseFloat(r.kmIntervenidos) || 0;
+    var afAnterior = rIdx > 0 ? (parseFloat(registros[rIdx - 1].avanceFisico) || 0) : 0;
+    var delta = parseFloat(r.avanceFisico) - afAnterior;
+    var kmAcum = registros.slice(0, rIdx + 1).reduce(function(a, reg) { return a + (parseFloat(reg.kmIntervenidos) || 0); }, 0);
+
     return '<div class="avance-registro">' +
       '<div class="avance-registro-header">' +
         '<div>' +
           '<span class="avance-registro-fecha">' + (r.fechaCorte || r.fecha || '—') + '</span>' +
           '<span class="avance-registro-autor"> · ' + (r.registradoPor || '') + '</span>' +
         '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px;">' +
-          '<span class="avance-fis-badge">Fís: ' + parseFloat(r.avanceFisico||0).toFixed(1) + '%</span>' +
-          (r.avanceFinanciero ? '<span class="avance-fin-badge">Fin: ' + parseFloat(r.avanceFinanciero).toFixed(1) + '%</span>' : '') +
-          '<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" title="Generar reporte de este avance" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>' +
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+          '<span class="avance-fis-badge">Fís: ' + parseFloat(r.avanceFisico||0).toFixed(1) + '% ' +
+            (delta !== 0 ? '<span style="font-size:9px;opacity:.8;">' + (delta > 0 ? '▲' : '▼') + Math.abs(delta).toFixed(1) + '</span>' : '') +
+          '</span>' +
+          (km > 0 ? '<span style="font-size:10px;font-weight:600;color:var(--verde);background:var(--verde-l);padding:2px 8px;border-radius:8px;">' + km.toFixed(2) + ' km</span>' : '') +
+          (kmAcum > 0 ? '<span style="font-size:9px;color:var(--gris3);">acum: ' + kmAcum.toFixed(2) + ' km</span>' : '') +
+          '<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>' +
         '</div>' +
       '</div>' +
       (r.observaciones ? '<div class="avance-registro-obs">' + r.observaciones + '</div>' : '') +
-      (fotos.length ? '<div class="fotos-grid avance-fotos">' + fotos.map(function(f, fi) {
-        return '<div class="foto-item"><img src="' + f.url + '" class="foto-thumb" onclick="_verFoto(\''+f.url+'\',\''+encodeURIComponent(f.descripcion||'')+'\')"/><div class="foto-meta"><div class="foto-desc">' + (f.descripcion||'') + '</div></div></div>';
+      (fotos.length ? '<div class="fotos-grid avance-fotos">' + fotos.map(function(f) {
+        return '<div class="foto-item"><img src="' + f.url + '" class="foto-thumb" onclick="_verFoto(\''+f.url+'\',\''+encodeURIComponent(f.descripcion||'')+'\')" />' +
+          '<div class="foto-meta"><div class="foto-desc">' + (f.descripcion||'') + '</div></div></div>';
       }).join('') + '</div>' : '') +
     '</div>';
   }).join('');
+
+  return totalBanner + listaHtml;
 }
 
 // Modal de Registro de Avance
@@ -1383,20 +1416,23 @@ function abrirRegistroAvance(u, idx) {
   if (!p) return;
   var esSup = p.tipoProyecto === 'supervision';
   var nc = esSup ? (p.noContratoSup||'—') : (p.noContrato||'—');
-  var hoy = new Date().toISOString().slice(0,10);
+  var hoy      = new Date().toISOString().slice(0,10);
   var afActual = parseFloat(p.avanceFisico) || 0;
-  var afinActual = parseFloat(p.avanceFinanciero) || 0;
+  var kmTotal  = parseFloat(p.longitud) || 0;
+  // KM acumulados hasta ahora
+  var kmAcumActual = (p.registrosAvance || []).reduce(function(a, r) { return a + (parseFloat(r.kmIntervenidos) || 0); }, 0);
 
   document.getElementById('modalTitle').textContent = 'Registrar Avance — ' + nc;
   document.getElementById('modalBody').innerHTML =
     '<div style="font-size:11px;color:var(--gris3);margin-bottom:14px;">'+
       'Proyecto: <strong style="color:var(--az1);">' + (p.proyecto||'').slice(0,70) + '</strong>'+
+      (kmTotal > 0 ? ' <span style="color:var(--verde);">('+kmTotal.toFixed(2)+' km totales · '+kmAcumActual.toFixed(2)+' km acum.)</span>' : '') +
     '</div>' +
 
     '<div class="form-grid g2" style="margin-bottom:12px;">' +
       '<div class="form-group"><label>Fecha de Corte <span class="req">*</span></label>' +
         '<input type="date" id="av-fecha" value="'+hoy+'"/></div>' +
-      '<div class="form-group"><label>Avance Físico (%) <span class="req">*</span></label>' +
+      '<div class="form-group"><label>Avance Físico del Proyecto (%) <span class="req">*</span></label>' +
         '<div style="display:flex;align-items:center;gap:8px;">' +
           '<input type="number" id="av-fisico" value="'+afActual.toFixed(1)+'" min="0" max="100" step="0.1" style="width:100px;" ' +
             'oninput="this.value=Math.min(100,Math.max(0,parseFloat(this.value)||0));_avBarUpdate()"/>' +
@@ -1408,8 +1444,13 @@ function abrirRegistroAvance(u, idx) {
     '</div>' +
 
     '<div class="form-grid g2" style="margin-bottom:12px;">' +
-      '<div class="form-group"><label>Avance Financiero (%) <span style="font-size:10px;color:var(--gris3)">(opcional)</span></label>' +
-        '<input type="number" id="av-financiero" value="'+afinActual.toFixed(1)+'" min="0" max="100" step="0.1" placeholder="0.0"/></div>' +
+      '<div class="form-group"><label>KM Intervenidos en este avance</label>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<input type="number" id="av-km" value="" min="0" step="0.01" placeholder="0.00" style="flex:1;"/>' +
+          '<span style="font-size:12px;color:var(--gris3);white-space:nowrap;">km</span>' +
+        '</div>' +
+        (kmTotal > 0 ? '<div style="font-size:10px;color:var(--gris3);margin-top:3px;">Total proyecto: '+kmTotal.toFixed(2)+' km · Acumulado: '+kmAcumActual.toFixed(2)+' km</div>' : '') +
+      '</div>' +
       '<div class="form-group"></div>' +
     '</div>' +
 
@@ -1481,10 +1522,10 @@ async function _guardarRegistroAvance() {
   var p   = DB[u] && DB[u][idx];
   if (!p) return;
 
-  var fecha   = (document.getElementById('av-fecha')      || {}).value || '';
-  var avFis   = parseFloat((document.getElementById('av-fisico')      || {}).value) || 0;
-  var avFin   = parseFloat((document.getElementById('av-financiero')  || {}).value) || 0;
-  var obs     = (document.getElementById('av-obs')        || {}).value || '';
+  var fecha   = (document.getElementById('av-fecha')  || {}).value || '';
+  var avFis   = parseFloat((document.getElementById('av-fisico') || {}).value) || 0;
+  var kmInt   = parseFloat((document.getElementById('av-km')     || {}).value) || 0;
+  var obs     = (document.getElementById('av-obs')    || {}).value || '';
 
   if (!fecha)       { showToast('Indique la fecha de corte.', 'err'); return; }
   if (avFis <= 0)   { showToast('El avance físico debe ser mayor a 0.', 'err'); return; }
@@ -1523,7 +1564,7 @@ async function _guardarRegistroAvance() {
     id:              Date.now(),
     fechaCorte:      fecha,
     avanceFisico:    avFis,
-    avanceFinanciero:avFin || null,
+    kmIntervenidos:  kmInt || null,
     observaciones:   obs,
     fotos:           fotosSubidas,
     registradoPor:   currentUser ? (currentUser.nombre || currentUser.email) : 'Usuario',
@@ -1534,10 +1575,8 @@ async function _guardarRegistroAvance() {
   registros.push(nuevoRegistro);
 
   // Actualizar avance físico del proyecto con el último registro
-  var afAnterior = parseFloat(p.avanceFisico) || 0;
   p.registrosAvance = registros;
   p.avanceFisico    = String(avFis);
-  if (avFin > 0) p.avanceFinanciero = String(avFin);
 
   var ok = await _guardarFotosEnDB(u, idx, p.fotos || []);  // reutiliza la función existente pero guarda todo el data
   // En realidad necesitamos guardar todo el proyecto actualizado:
@@ -1560,9 +1599,8 @@ async function _guardarRegistroAvance() {
         headers: {'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,
                   'Content-Type':'application/json','Prefer':'return=minimal'},
         body: JSON.stringify({
-          data:              newData,
-          avance_fisico:     avFis,
-          avance_financiero: avFin > 0 ? avFin : undefined
+          data:          newData,
+          avance_fisico: avFis
         })
       });
       guardado = pResp.ok;
@@ -1610,7 +1648,7 @@ function generarReporteAvance(u, idx, registroIdx) {
     afAnt = parseFloat(p.registrosAvance[registroIdx-1].avanceFisico) || 0;
   }
   var afActual = parseFloat(r.avanceFisico) || 0;
-  var afinActual = parseFloat(r.avanceFinanciero) || 0;
+  var afinActual = 0; // avance financiero ya no se usa en avances semanales
   var mI = parseFloat(p.montoContratoInicial)||0;
   var mM = parseFloat(p.montoModificacion)||0;
   var vig= mM>0?mM:mI;
@@ -1690,17 +1728,22 @@ function generarReporteAvance(u, idx, registroIdx) {
   '</div></div>'+
 
   // KPIs de avance
-  '<div class="section"><div class="sec-t">Avance al '+r.fechaCorte+'</div><div class="sec-b">'+
-    '<div class="g3" style="margin-bottom:14px;">'+
-      '<div class="kpi"><div class="kpi-l">Avance Físico</div><div class="kpi-v" style="color:#1268C4;">'+afActual.toFixed(1)+'%</div>'+
-        (registroIdx>0?'<div class="delta" style="color:'+(afActual-afAnt>=0?'#0D7A4E':'#C0392B')+'">'+(afActual-afAnt>=0?'▲':'▼')+' '+Math.abs(afActual-afAnt).toFixed(1)+'% vs período ant.</div>':'')+
+  (function() {
+    var kmEsteAv  = parseFloat(r.kmIntervenidos) || 0;
+    var kmAcumRep = p.registrosAvance.slice(0, registroIdx + 1).reduce(function(a, reg) { return a + (parseFloat(reg.kmIntervenidos)||0); }, 0);
+    var kmTotProy = parseFloat(p.longitud) || 0;
+    return '<div class="section"><div class="sec-t">Avance al '+r.fechaCorte+'</div><div class="sec-b">' +
+      '<div class="g3" style="margin-bottom:14px;">' +
+        '<div class="kpi"><div class="kpi-l">Avance Físico</div><div class="kpi-v" style="color:#1268C4;">'+afActual.toFixed(1)+'%</div>'+
+          (registroIdx>0?'<div class="delta" style="color:'+(afActual-afAnt>=0?'#0D7A4E':'#C0392B')+'">'+(afActual-afAnt>=0?'▲':'▼')+' '+Math.abs(afActual-afAnt).toFixed(1)+'% vs período ant.</div>':'')+
+        '</div>'+
+        (kmEsteAv>0?'<div class="kpi"><div class="kpi-l">KM este período</div><div class="kpi-v" style="color:#0D7A4E;">'+kmEsteAv.toFixed(2)+' km</div></div>':'<div class="kpi"><div class="kpi-l">Monto Vigente</div><div class="kpi-v" style="color:#001233;font-size:11pt;">'+fmtL(vig)+'</div></div>')+
+        (kmAcumRep>0?'<div class="kpi"><div class="kpi-l">KM acumulados'+(kmTotProy>0?' / '+kmTotProy.toFixed(2)+' km':'')+' </div><div class="kpi-v" style="color:#002B6B;">'+kmAcumRep.toFixed(2)+' km</div></div>':'<div></div>')+
       '</div>'+
-      (afinActual>0?'<div class="kpi"><div class="kpi-l">Avance Financiero</div><div class="kpi-v" style="color:#0D7A4E;">'+afinActual.toFixed(1)+'%</div></div>':'<div></div>')+
-      '<div class="kpi"><div class="kpi-l">Monto Vigente</div><div class="kpi-v" style="color:#001233;font-size:11pt;">'+fmtL(vig)+'</div></div>'+
-    '</div>'+
-    '<div style="margin-bottom:8px;"><div class="lbl" style="margin-bottom:4px;">Avance Físico</div>'+svgBar(afActual,'#1268C4')+'</div>'+
-    (afinActual>0?'<div><div class="lbl" style="margin-bottom:4px;">Avance Financiero</div>'+svgBar(afinActual,'#0D7A4E')+'</div>':'')+
-  '</div></div>'+
+      '<div style="margin-bottom:8px;"><div class="lbl" style="margin-bottom:4px;">Avance Físico</div>'+svgBar(afActual,'#1268C4')+'</div>'+
+      (kmTotProy>0&&kmAcumRep>0?'<div><div class="lbl" style="margin-bottom:4px;">KM Intervenidos acumulados</div>'+svgBar(Math.min(kmAcumRep/kmTotProy*100,100),'#0D7A4E')+'</div>':'')+
+    '</div></div>';
+  })() +
 
   // Observaciones
   (r.observaciones?
@@ -1718,7 +1761,9 @@ function generarReporteAvance(u, idx, registroIdx) {
         '<td>'+(ri+1)+'</td>'+
         '<td>'+reg.fechaCorte+'</td>'+
         '<td style="font-family:monospace;color:#1268C4;">'+parseFloat(reg.avanceFisico||0).toFixed(1)+'%</td>'+
-        '<td style="font-family:monospace;color:#0D7A4E;">'+(reg.avanceFinanciero?parseFloat(reg.avanceFinanciero).toFixed(1)+'%':'—')+'</td>'+
+        '<td style="font-family:monospace;color:'+(parseFloat(reg.avanceFisico||0)-(ri>0?parseFloat(p.registrosAvance[ri-1].avanceFisico)||0:0)>=0?'#0D7A4E':'#C0392B')+'">'+(function(){var d=parseFloat(reg.avanceFisico||0)-(ri>0?parseFloat(p.registrosAvance[ri-1].avanceFisico)||0:0);return (d>=0?'▲':'▼')+Math.abs(d).toFixed(1)+'%';})()+'</td>'+
+        '<td style="font-family:monospace;">'+( parseFloat(reg.kmIntervenidos||0)>0?parseFloat(reg.kmIntervenidos).toFixed(2)+' km':'—')+'</td>'+
+        '<td style="font-family:monospace;">'+(function(){var a=p.registrosAvance.slice(0,ri+1).reduce(function(s,rr){return s+(parseFloat(rr.kmIntervenidos)||0);},0);return a>0?a.toFixed(2)+' km':'—';})()+'</td>'+
         '<td>'+reg.registradoPor+'</td>'+
       '</tr>';
     }).join('')+
