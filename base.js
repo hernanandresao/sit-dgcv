@@ -530,12 +530,7 @@ function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
     '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Modificaciones / Órdenes de Cambio</div>' +
     '<div id="mods-container"></div>' +
     '<button class="add-row-btn" onclick="addModificacion()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Modificación / Orden de Cambio</button>' +
-    '<div class="form-grid g1" style="margin-top:10px">' +
-      '<div class="form-group"><label>Avance Físico de la Obra (%) <span class="req">*</span></label>' +
-        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">0%</span></div>' +
-        '<div class="form-hint">El avance financiero se calcula automáticamente desde los pagos</div>' +
-      '</div>' +
-    '</div>' +
+    '<input type="hidden" id="f_avanceFisico" value="'+fv('avanceFisico')+'" />' +
     '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
     '<div id="pagos-container"></div>' +
     '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
@@ -638,11 +633,7 @@ function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
     '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Modificaciones / Órdenes de Cambio</div>' +
     '<div id="mods-container"></div>' +
     '<button class="add-row-btn" onclick="addModificacion()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Modificación / Orden de Cambio</button>' +
-    '<div class="form-grid g1" style="margin-top:10px">' +
-      '<div class="form-group"><label>Avance de Ejecución (%) <span class="req">*</span></label>' +
-        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--verde);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--verde);width:40px;text-align:right">0%</span></div>' +
-      '</div>' +
-    '</div>' +
+    '<input type="hidden" id="f_avanceFisico" value="'+fv('avanceFisico')+'" />' +
     '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
     '<div id="pagos-container"></div>' +
     '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
@@ -1486,26 +1477,28 @@ function abrirRegistroAvance(u, idx) {
     '<div class="form-grid g2" style="margin-bottom:12px;">' +
       '<div class="form-group"><label>Fecha de Corte <span class="req">*</span></label>' +
         '<input type="date" id="av-fecha" value="'+hoy+'"/></div>' +
-      '<div class="form-group"><label>Avance Físico del Proyecto (%) <span class="req">*</span></label>' +
+      '<div class="form-group"><label>KM Intervenidos en este avance <span class="req">*</span></label>' +
         '<div style="display:flex;align-items:center;gap:8px;">' +
-          '<input type="number" id="av-fisico" value="'+afActual.toFixed(1)+'" min="0" max="100" step="0.1" style="width:100px;" ' +
-            'oninput="this.value=Math.min(100,Math.max(0,parseFloat(this.value)||0));_avBarUpdate()"/>' +
-          '<div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden">' +
-            '<div id="av-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+Math.min(afActual,100)+'%"></div>' +
-          '</div>' +
-          '<span id="av-bar-lbl" style="font-size:11px;font-family:var(--mono);color:var(--az2);width:38px;text-align:right">'+afActual.toFixed(1)+'%</span>' +
-        '</div></div>' +
-    '</div>' +
-
-    '<div class="form-grid g2" style="margin-bottom:12px;">' +
-      '<div class="form-group"><label>KM Intervenidos en este avance</label>' +
-        '<div style="display:flex;align-items:center;gap:8px;">' +
-          '<input type="number" id="av-km" value="" min="0" step="0.01" placeholder="0.00" style="flex:1;"/>' +
+          '<input type="number" id="av-km" value="" min="0" step="0.01" placeholder="0.00" style="flex:1;" oninput="_avKmUpdate()"/>' +
           '<span style="font-size:12px;color:var(--gris3);white-space:nowrap;">km</span>' +
         '</div>' +
-        (kmTotal > 0 ? '<div style="font-size:10px;color:var(--gris3);margin-top:3px;">Total proyecto: '+kmTotal.toFixed(2)+' km · Acumulado: '+kmAcumActual.toFixed(2)+' km</div>' : '') +
+        (kmTotal > 0 ? '<div style="font-size:10px;color:var(--gris3);margin-top:3px;">Total proyecto: '+kmTotal.toFixed(2)+' km · Acumulado actual: '+kmAcumActual.toFixed(2)+' km</div>' : '') +
       '</div>' +
-      '<div class="form-group"></div>' +
+    '</div>' +
+
+    // Avance calculado automáticamente (solo lectura)
+    '<div style="background:var(--az7);border:1px solid var(--az6);border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">' +
+      '<div>' +
+        '<div style="font-size:10px;font-weight:600;color:var(--az2);text-transform:uppercase;margin-bottom:2px;">Avance Físico calculado</div>' +
+        '<div style="font-size:10px;color:var(--gris3);">'+(kmTotal>0?'KM acumulados / KM total del proyecto':'Ingrese KM para calcular automáticamente')+'</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<div style="width:120px;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden">' +
+          '<div id="av-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+Math.min(afActual,100)+'%"></div>' +
+        '</div>' +
+        '<span id="av-bar-lbl" style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--az2);min-width:48px;text-align:right">'+afActual.toFixed(1)+'%</span>' +
+        '<input type="hidden" id="av-fisico" value="'+afActual.toFixed(1)+'"/>' +
+      '</div>' +
     '</div>' +
 
     '<div class="form-group" style="margin-bottom:12px;"><label>Observaciones / Descripción del Avance</label>' +
@@ -1537,11 +1530,29 @@ function abrirRegistroAvance(u, idx) {
 }
 
 function _avBarUpdate() {
-  var v = parseFloat(document.getElementById('av-fisico').value) || 0;
+  // Legacy — no-op (ahora usa _avKmUpdate)
+}
+function _avKmUpdate() {
+  var kmNuevo = parseFloat((document.getElementById('av-km') || {}).value) || 0;
+  var ref = window._avEditRef;
+  if (!ref) return;
+  var p = DB[ref.u] && DB[ref.u][ref.idx];
+  if (!p) return;
+  var kmTotal = parseFloat(p.longitud) || 0;
+  var kmAcum  = (p.registrosAvance || []).reduce(function(a, r) { return a + (parseFloat(r.kmIntervenidos) || 0); }, 0);
+  var avFis;
+  if (kmTotal > 0) {
+    avFis = Math.min(100, Math.round((kmAcum + kmNuevo) / kmTotal * 1000) / 10);
+  } else {
+    // Sin longitud definida: no se puede calcular, mantener avance actual
+    avFis = parseFloat(p.avanceFisico) || 0;
+  }
   var bar = document.getElementById('av-bar');
   var lbl = document.getElementById('av-bar-lbl');
-  if (bar) bar.style.width = Math.min(v,100) + '%';
-  if (lbl) lbl.textContent = v.toFixed(1) + '%';
+  var hid = document.getElementById('av-fisico');
+  if (bar) bar.style.width = Math.min(avFis, 100) + '%';
+  if (lbl) lbl.textContent = avFis.toFixed(1) + '%';
+  if (hid) hid.value = avFis.toFixed(1);
 }
 
 // Preview de fotos seleccionadas (antes de subir)
@@ -1581,8 +1592,8 @@ async function _guardarRegistroAvance() {
   var kmInt   = parseFloat((document.getElementById('av-km')     || {}).value) || 0;
   var obs     = (document.getElementById('av-obs')    || {}).value || '';
 
-  if (!fecha)       { showToast('Indique la fecha de corte.', 'err'); return; }
-  if (avFis <= 0)   { showToast('El avance físico debe ser mayor a 0.', 'err'); return; }
+  if (!fecha)        { showToast('Indique la fecha de corte.', 'err'); return; }
+  if (kmInt <= 0)    { showToast('Ingrese los KM intervenidos en este avance.', 'err'); return; }
 
   var btnGuardar = document.querySelector('.modal-footer .btn-primary');
   if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...'; }
@@ -2718,8 +2729,7 @@ function saveProject() {
     if (!g('f_supervisora'))      errs.push('Empresa Supervisora');
     if (!g('f_noContratoSup'))    errs.push('N° Contrato de Supervisión');
     if (!g('f_fechaAdjudicacion'))errs.push('Fecha de Adjudicación');
-    var avF = parseFloat(g('f_avanceFisico'));
-    if (g('f_avanceFisico')===''||isNaN(avF)||avF<0||avF>100) errs.push('Avance de Ejecución (0–100%)');
+    // Avance físico se calcula automáticamente desde registros de avance
     if (errs.length) { showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err'); return; }
 
     var cambiosSup = [];
@@ -2761,7 +2771,7 @@ function saveProject() {
       montoModificacion:    mM > 0 ? String(mM) : '',
       modificaciones:       modificaciones,
       plazo:                plazoFinal,
-      avanceFisico:         g('f_avanceFisico'),
+      avanceFisico:         g('f_avanceFisico') || '0',
       avanceFinanciero:     String(avFin),
       pagos:                pagos,
       totalDevengado:       dev.toFixed(2),
@@ -2801,13 +2811,12 @@ function saveProject() {
     if (tipoSup === 'interna' && !g('f_supervisorCampo')) errs.push('Nombre del Supervisor de Campo');
     if (tipoSup === 'externa' && contratosSupervision.length > 0 && !g('f_contratoSupervisionId')) errs.push('Contrato de Supervisión Externa');
     if (!g('f_fechaAdjudicacion')) errs.push('Fecha de Adjudicación');
-    var avF = parseFloat(g('f_avanceFisico'));
-    if (g('f_avanceFisico')===''||isNaN(avF)||avF<0||avF>100) errs.push('Avance Físico (0–100%)');
+    // Avance físico se calcula automáticamente desde registros de avance
     if (errs.length) {
       showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err');
       ['f_nProceso','f_estado','f_proyecto','f_descripcion','f_longitud',
        'f_departamento','f_municipio','f_aldeaBarrio','f_latitud','f_longitudRef',
-       'f_constructora','f_coordinador','f_fechaAdjudicacion','f_avanceFisico'
+       'f_constructora','f_coordinador','f_fechaAdjudicacion'
       ].forEach(function(id) {
         var el = document.getElementById(id); if (!el) return;
         var empty = id==='f_avanceFisico' ? (el.value===''||isNaN(parseFloat(el.value))) : !el.value;
@@ -2869,7 +2878,7 @@ function saveProject() {
       montoModificacion:    mM > 0 ? String(mM) : '',
       modificaciones:       modificaciones,
       plazo:                plazoFinal,
-      avanceFisico:         g('f_avanceFisico'),
+      avanceFisico:         g('f_avanceFisico') || '0',
       avanceFinanciero:     String(avFin),
       pagos:                pagos,
       totalDevengado:       dev.toFixed(2),
@@ -3724,27 +3733,15 @@ function abrirOpcionesReporte() {
     '<div class="reporte-chips" id="reporte-anio-chips">' +
       (function(){
         var y = new Date().getFullYear();
-        var s = '<button class="reporte-chip selected" data-anio="'+y+'" onclick="_selAnio(this)">'+y+' (actual)</button>';
+        var s = '<button class="reporte-chip selected" data-anio="todos" onclick="_selAnio(this)">Todos los años</button>';
+        s += '<button class="reporte-chip" data-anio="'+y+'" onclick="_selAnio(this)">'+y+'</button>';
         for(var i=y-1; i>=2024; i--)
           s += '<button class="reporte-chip" data-anio="'+i+'" onclick="_selAnio(this)">'+i+'</button>';
         return s;
       })() +
     '</div>' +
 
-    // ── Tipo de análisis
-    '<div class="reporte-section-lbl" style="margin-top:14px;">Tipo de análisis</div>' +
-    '<div class="reporte-chips">' +
-      '<button class="reporte-chip selected" data-analisis="estado" onclick="_selAnalisis(this)">Estado actual</button>' +
-      '<button class="reporte-chip" data-analisis="proyeccion" onclick="_selAnalisis(this)">Proyección trimestral</button>' +
-    '</div>' +
-
-    // ── Info proyección
-    '<div id="reporte-proyeccion-info" style="display:none;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:10px 12px;margin-top:12px;font-size:11px;color:var(--az2);line-height:1.6;">' +
-      '<strong>Proyección trimestral:</strong> El sistema detecta automáticamente el trimestre actual ' +
-      'y proyecta el avance físico y financiero esperado al cierre del <strong>siguiente trimestre</strong>. ' +
-      'Basada en la tasa de avance diaria de cada proyecto activo del año seleccionado. ' +
-      'Identifica proyectos en riesgo de no completarse en plazo.' +
-    '</div>';
+    '';
 
   // Cambiar botón de guardar
   var btnGuardar = document.querySelector('.modal-footer .btn-primary');
@@ -3798,8 +3795,7 @@ function _ejecutarReporte() {
   var esGlobal  = document.getElementById('ropt-global').classList.contains('selected');
   var anioBtn   = document.querySelector('[data-anio].selected');
   var anioReporte = anioBtn ? parseInt(anioBtn.getAttribute('data-anio')) : new Date().getFullYear();
-  var analBtn   = document.querySelector('[data-analisis].selected');
-  var analisis  = analBtn ? analBtn.getAttribute('data-analisis') : 'estado';
+  var analisis  = 'estado'; // Solo estado actual
 
   // Unidades seleccionadas
   var unidades = esGlobal
@@ -3815,11 +3811,7 @@ function _ejecutarReporte() {
     if (btnGuardar) btnGuardar.onclick = saveProject;
   }, 100);
 
-  if (analisis === 'proyeccion') {
-    _generarReporteProyeccion(unidades, anioReporte);
-  } else {
-    _generarReporteEstado(unidades, anioReporte, esGlobal);
-  }
+  _generarReporteEstado(unidades, anioReporte, esGlobal);
 }
 
 // ── REPORTE DE ESTADO ACTUAL ─────────────────────────────────────────────────
@@ -3833,6 +3825,7 @@ function _generarReporteEstado(unidades, anioReporte, esGlobal) {
   // Filtrar proyectos por año: usa campo anioProyecto si existe,
   // sino infiere del nProceso o fechaInicio
   function filtroAnio(p) {
+    if (String(anioReporte) === 'todos') return true;
     // 1. Campo explícito anioProyecto — tiene prioridad absoluta
     if (p.anioProyecto) {
       return String(p.anioProyecto) === String(anioReporte);
