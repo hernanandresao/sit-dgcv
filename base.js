@@ -1945,12 +1945,37 @@ var BUCKET      = 'fotos-proyectos';
 // Verifica si el usuario actual es admin O coordinador asignado al proyecto
 function _puedeOperar(p) {
   if (!currentUser) return false;
+  // Admins siempre pueden
   if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
-  // Coordinador: nombre o email coincide con el campo coordinador del proyecto
-  var nombre = (currentUser.nombre || '').toLowerCase().trim();
-  var email  = (currentUser.email  || '').toLowerCase().trim();
-  var coord  = (p.coordinador || '').toLowerCase().trim();
-  return coord && (coord.includes(nombre) || coord.includes(email) || nombre.includes(coord));
+
+  // Coordinador de unidad: puede operar proyectos de su unidad
+  // (lógica más permisiva que editar — puede subir fotos, avances, reportes)
+  if (currentUser.esUnidadCoord) {
+    // Verificar que el proyecto pertenezca a su unidad
+    if (p._unidad && currentUser.unidad && p._unidad === currentUser.unidad) return true;
+    // O que el coordinador del proyecto coincida con su nombre/email
+  }
+
+  // Matching flexible: normalizar texto (sin tildes, minúsculas, sin espacios extra)
+  function norm(s) {
+    return (s||'').toLowerCase().trim()
+      .normalize('NFD').replace(/[̀-ͯ]/g,'')  // quitar tildes
+      .replace(/\s+/g,' ');
+  }
+  var nombre = norm(currentUser.nombre);
+  var email  = norm(currentUser.email);
+  var coord  = norm(p.coordinador);
+
+  if (!coord) return false;
+
+  // Coincidencia exacta o contenida
+  if (coord.includes(nombre) || nombre.includes(coord)) return true;
+  if (coord.includes(email)  || email.includes(coord))  return true;
+
+  // Coincidencia por primer apellido o primer nombre (tolerancia a nombre completo vs apodo)
+  var partsNombre = nombre.split(' ').filter(function(t){ return t.length > 2; });
+  var partsCoord  = coord.split(' ').filter(function(t){ return t.length > 2; });
+  return partsNombre.some(function(t){ return partsCoord.includes(t); });
 }
 
 
@@ -3131,37 +3156,25 @@ async function guardarUsuario(id) {
 
     try {
       // 1. Crear cuenta en Supabase Auth
+      // Llamar Edge Function crear-usuario (usa service_role internamente)
       var siteUrl = window.location.origin + window.location.pathname;
-      var signupResp = await fetch(SUPA_AUTH + '/signup', {
+      var fnUrl   = SUPA_PROJECT + '/functions/v1/crear-usuario';
+      var signupResp = await fetch(fnUrl, {
         method: 'POST',
-        headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email:            email,
-          password:         pass,
-          options: {
-            emailRedirectTo: siteUrl,
-            data: { nombre: nombre, unidad: unidad, rol: rol }
-          }
-        })
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': 'Bearer ' + currentToken,
+          'apikey':        SUPA_KEY
+        },
+        body: JSON.stringify({ email: email, password: pass, nombre: nombre, unidad: unidad, rol: rol })
       });
       var signupData = await signupResp.json();
-      if (!signupResp.ok) {
-        var msg = signupData.msg || signupData.error_description || signupData.message || 'Error desconocido';
-        showToast('Error Auth: ' + msg, 'err');
+      if (!signupResp.ok || signupData.error) {
+        showToast('Error: ' + (signupData.error || 'No se pudo crear el usuario.'), 'err');
         return;
       }
 
-      // 2. Crear perfil en tabla usuarios
-      await supaPost('usuarios', {
-        id:     genUUID(),
-        email:  email,
-        nombre: nombre,
-        unidad: unidad,
-        rol:    rol,
-        activo: true
-      });
-
-      showToast('Usuario creado. Se envió un correo de verificación a ' + email + '. El usuario debe confirmar su correo antes de ingresar.', 'ok');
+      showToast(signupData.message || 'Usuario creado. Correo de verificación enviado a ' + email + '.', 'ok');
       closeModal();
       document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
       renderUsuariosPanel();
@@ -3197,12 +3210,21 @@ async function enviarResetPassword(email) {
   if (!confirm('¿Enviar correo de restablecimiento a ' + email + '?')) return;
   try {
     var siteUrl = window.location.origin + window.location.pathname;
-    var resp = await fetch(SUPA_AUTH + '/recover', {
+    var fnUrl   = SUPA_PROJECT + '/functions/v1/reset-password';
+    var resp    = await fetch(fnUrl, {
       method: 'POST',
-      headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email, gotrue_meta_security: {}, redirect_to: siteUrl })
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': 'Bearer ' + currentToken,
+        'apikey':        SUPA_KEY
+      },
+      body: JSON.stringify({ email: email, redirectTo: siteUrl })
     });
-    showToast(resp.ok ? 'Correo de restablecimiento enviado a ' + email + '. El enlace redirigirá al sistema.' : 'No se pudo enviar el correo.', resp.ok ? 'ok' : 'err');
+    var rData = await resp.json().catch(function(){ return {}; });
+    showToast(resp.ok && !rData.error
+      ? 'Correo de restablecimiento enviado a ' + email + '. El enlace redirigirá al SIT.'
+      : 'Error: ' + (rData.error || 'No se pudo enviar el correo.'),
+      resp.ok && !rData.error ? 'ok' : 'err');
   } catch(e) { showToast('Error: ' + e.message, 'err'); }
 }
 
