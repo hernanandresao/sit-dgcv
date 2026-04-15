@@ -14,31 +14,36 @@
 
   // Confirmar registro de nuevo usuario
   if (params.type === 'signup' && params.access_token) {
-    window._signupToken = params.access_token;
     history.replaceState(null, '', window.location.pathname);
-    // Activar el perfil del usuario en la BD
-    fetch(SUPA_URL + '/usuarios?select=email', {
+
+    // Obtener el email del token y activar el perfil directamente
+    fetch(SUPA_AUTH + '/user', {
       headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + params.access_token }
     })
     .then(function(r){ return r.json(); })
-    .then(function(data){
-      if (data && data[0] && data[0].email) {
-        // Activar el perfil
-        fetch(SUPA_URL + '/usuarios?email=eq.' + encodeURIComponent(data[0].email), {
-          method: 'PATCH',
-          headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + params.access_token,
-                     'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ activo: true })
-        });
-      }
+    .then(function(userData){
+      var email = userData && userData.email;
+      if (!email) return;
+      // Activar perfil usando la anon key con el token del usuario recién confirmado
+      return fetch(SUPA_URL + '/usuarios?email=eq.' + encodeURIComponent(email), {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPA_KEY,
+          'Authorization': 'Bearer ' + params.access_token,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ activo: true })
+      });
     })
     .catch(function(e){ console.warn('Error activando perfil:', e); });
-    // Mostrar mensaje de éxito y auto-llenar el correo si lo tenemos
+
+    // Mostrar login con mensaje de éxito
     var loginScreen = document.getElementById('loginScreen');
     if (loginScreen) loginScreen.style.display = 'flex';
     var loginError = document.getElementById('loginError');
     if (loginError) {
-      loginError.textContent = '✓ Correo verificado correctamente. Ya puede ingresar con sus credenciales.';
+      loginError.textContent = '\u2713 Correo verificado correctamente. Ya puede ingresar con sus credenciales.';
       loginError.style.color = '#0D7A4E';
       loginError.style.background = '#E3F5EE';
       loginError.style.border = '1px solid #0D7A4E';
