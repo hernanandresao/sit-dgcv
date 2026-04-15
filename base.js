@@ -334,13 +334,20 @@ function _filtrarContratosSup(q) {
   var dropdown = document.getElementById('sup-dropdown');
   if (!dropdown) return;
   var qL = (q || '').toLowerCase().trim();
+  // Obtener unidad del formulario activo
+  var unidadActual = window._avEditRef ? window._avEditRef.u : (currentUser ? currentUser.unidad : '');
+  // Si no hay _avEditRef, buscar en la URL o en el estado activo
+  if (!unidadActual && window._currentFormUnidad) unidadActual = window._currentFormUnidad;
+  var pool = unidadActual
+    ? contratosSupervision.filter(function(s){ return s._unidad === unidadActual; })
+    : contratosSupervision;
   var filtrados = qL
-    ? contratosSupervision.filter(function(s) {
+    ? pool.filter(function(s) {
         return (s.noContratoSup || '').toLowerCase().includes(qL) ||
                (s.supervisora   || '').toLowerCase().includes(qL) ||
                (s.nProceso      || '').toLowerCase().includes(qL);
       })
-    : contratosSupervision;
+    : pool;
 
   if (!filtrados.length) {
     dropdown.innerHTML = '<div style="padding:10px 12px;font-size:11px;color:var(--gris3);">Sin resultados</div>';
@@ -399,11 +406,12 @@ function onSelectContratoSupervision(sel) {
 // ═══════════════════════════════════════════════════════════
 function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
   var tipoSup = p.tipoSupervision || 'externa';
-  var haySupContratos = contratosSupervision.length > 0;
+  // Filtrar contratos de supervisión por unidad
+  var supDeLaUnidad = contratosSupervision.filter(function(s){ return s._unidad === u; });
+  var haySupContratos = supDeLaUnidad.length > 0;
   var supOpts = '<option value="">— Seleccione contrato de supervisión —</option>';
-  contratosSupervision.forEach(function(s) {
-    var unidLbl = UNIDADES[s._unidad] ? UNIDADES[s._unidad].nombre.split(' ').slice(0,2).join(' ') : s._unidad;
-    var lbl = (s.supervisora || '?') + ' — ' + (s.noContratoSup || 'S/N') + ' (' + unidLbl + ')';
+  supDeLaUnidad.forEach(function(s) {
+    var lbl = (s.supervisora || '?') + ' — ' + (s.noContratoSup || 'S/N');
     supOpts += '<option value="'+(s._sid||'')+'"'+(p.contratoSupervisionId===s._sid?' selected':'')+'>'+lbl+'</option>';
   });
 
@@ -776,7 +784,7 @@ async function doLogin() {
     if (!currentUser.esAdmin && !currentUser.esGlobalViewer) {
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
         var v = el.id.replace('nav-', '');
-        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos') el.style.display = 'none';
+        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos' && v !== 'mapa') el.style.display = 'none';
       });
     }
 
@@ -1349,7 +1357,7 @@ function openDetail(u, i) {
     '<div class="dp-section" id="dp-fotos-'+u+'-'+i+'">' +
       '<div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">' +
         '<span>Fotos del Proyecto</span>' +
-        (currentUser && (currentUser.esAdmin || currentUser.esGlobalAdmin) ? '<label class="foto-upload-btn" for="foto-input-'+u+'-'+i+'" title="Subir foto"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3.5 4.5l3-3 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 10v1a1 1 0 001 1h9a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg> Subir foto</label><input type="file" id="foto-input-'+u+'-'+i+'" accept="image/*" multiple style="display:none" onchange="subirFotos(this,\''+u+'\','+i+')"/>' : '') +
+        (_puedeOperar(p) ? '<label class="foto-upload-btn" for="foto-input-'+u+'-'+i+'" title="Subir foto"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3.5 4.5l3-3 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 10v1a1 1 0 001 1h9a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg> Subir foto</label><input type="file" id="foto-input-'+u+'-'+i+'" accept="image/*" multiple style="display:none" onchange="subirFotos(this,\''+u+'\','+i+')"/>' : '') +
       '</div>' +
       '<div id="fotos-grid-'+u+'-'+i+'" class="fotos-grid">' +
         _renderFotosGrid(p) +
@@ -1359,19 +1367,19 @@ function openDetail(u, i) {
     '<div class="dp-section" id="dp-avances-'+u+'-'+i+'">' +
       '<div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">' +
         '<span>Registros de Avance ('+(( p.registrosAvance||[]).length)+')</span>' +
-        '<button onclick="abrirRegistroAvance(\''+u+'\','+i+')" style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--verde);background:var(--verde-l);border:1px solid #b7e4cc;padding:4px 12px;border-radius:5px;cursor:pointer;font-family:var(--font);">'+
+        (_puedeOperar(p) ? '<button onclick="abrirRegistroAvance(\''+u+'\','+i+')" style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--verde);background:var(--verde-l);border:1px solid #b7e4cc;padding:4px 12px;border-radius:5px;cursor:pointer;font-family:var(--font);">'+
           '<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'+
           'Registrar Avance'+
-        '</button>' +
+        '</button>' : '') +
       '</div>' +
       '<div id="avances-lista-'+u+'-'+i+'">'+_renderAvancesLista(p, u, i)+'</div>' +
     '</div>' +
     '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>' +
     '<div style="padding:18px 0 4px;display:flex;gap:8px;">' +
-      '<button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="display:flex;align-items:center;justify-content:center;gap:8px;flex:1;padding:11px 16px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);">'+
+      (_puedeOperar(p) ? '<button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="display:flex;align-items:center;justify-content:center;gap:8px;flex:1;padding:11px 16px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);">'+
         '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="2" y="1" width="7" height="11" rx="1" stroke="white" stroke-width="1.2"/><path d="M4 4.5h4M4 6.5h4M4 8.5h2.5" stroke="white" stroke-width="1.1" stroke-linecap="round"/><path d="M8 1v2.5h2.5" stroke="white" stroke-width="1.1" stroke-linecap="round"/></svg>'+
         'Ficha del Proyecto'+
-      '</button>' +
+      '</button>' : '') +
     '</div>';
 
   document.getElementById('detailOverlay').classList.add('open');
@@ -1386,6 +1394,19 @@ function toggleHistDetail(id) {
   var el = document.getElementById(id);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
+
+// Helper: admin o coordinador asignado al proyecto puede gestionar fotos/avances/fichas
+function _puedeGestionar(u, idx) {
+  if (!currentUser) return false;
+  if (currentUser.esGlobalAdmin || currentUser.esAdmin) return true;
+  var p = DB[u] && DB[u][idx];
+  if (!p) return false;
+  var nombreCoord = (p.coordinador || '').toLowerCase().trim();
+  var nombreUser  = (currentUser.nombre || '').toLowerCase().trim();
+  var emailUser   = (currentUser.email  || '').toLowerCase().trim();
+  return nombreCoord && (nombreCoord === nombreUser || nombreCoord.includes(emailUser) || emailUser.includes(nombreCoord));
+}
+
 
 // ═══════════════════════════════════════════════════════════
 //  REGISTROS DE AVANCE SEMANAL
@@ -1438,7 +1459,7 @@ function _renderAvancesLista(p, u, idx) {
           '</span>' +
           (km > 0 ? '<span style="font-size:10px;font-weight:600;color:var(--verde);background:var(--verde-l);padding:2px 8px;border-radius:8px;">' + km.toFixed(2) + ' km</span>' : '') +
           (kmAcum > 0 ? '<span style="font-size:9px;color:var(--gris3);">acum: ' + kmAcum.toFixed(2) + ' km</span>' : '') +
-          '<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>' +
+          (_puedeOperar(p) ? '<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>' : '') +
           (currentUser && (currentUser.esAdmin || currentUser.esGlobalAdmin) ?
             '<button onclick="eliminarRegistroAvance(\''+u+'\','+idx+','+rIdx+')" title="Eliminar este registro" style="background:none;border:1px solid var(--rojo-l);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--rojo);cursor:pointer;font-family:var(--font);">✕ Borrar</button>'
           : '') +
@@ -1921,6 +1942,18 @@ function generarReporteAvance(u, idx, registroIdx) {
 var STORAGE_URL = SUPA_PROJECT + '/storage/v1';
 var BUCKET      = 'fotos-proyectos';
 
+// Verifica si el usuario actual es admin O coordinador asignado al proyecto
+function _puedeOperar(p) {
+  if (!currentUser) return false;
+  if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
+  // Coordinador: nombre o email coincide con el campo coordinador del proyecto
+  var nombre = (currentUser.nombre || '').toLowerCase().trim();
+  var email  = (currentUser.email  || '').toLowerCase().trim();
+  var coord  = (p.coordinador || '').toLowerCase().trim();
+  return coord && (coord.includes(nombre) || coord.includes(email) || nombre.includes(coord));
+}
+
+
 function _renderFotosGrid(p) {
   var fotos = p.fotos || [];
   if (!fotos.length) {
@@ -1933,7 +1966,7 @@ function _renderFotosGrid(p) {
         '<div class="foto-fecha">' + (f.fecha || '') + '</div>' +
         '<div class="foto-desc">' + (f.descripcion || '') + '</div>' +
       '</div>' +
-      (currentUser && (currentUser.esAdmin || currentUser.esGlobalAdmin) ?
+      (_puedeOperar(p) ?
         '<button class="foto-del" onclick="eliminarFoto(event,this,\''+f.path+'\',\''+f.url+'\')" title="Eliminar">✕</button>' : '') +
     '</div>';
   }).join('');
@@ -2363,6 +2396,7 @@ function _legacyModFromField(p) {
 //  FORMULARIO — ABRIR
 // ═══════════════════════════════════════════════════════════
 function openForm(u, idx) {
+  window._currentFormUnidad = u;
   var proj = (idx !== null && idx !== undefined) ? (DB[u] || [])[idx] : null;
   var perms = getPerms(u, proj);
   var isNew = (idx === null || idx === undefined);
@@ -3097,10 +3131,18 @@ async function guardarUsuario(id) {
 
     try {
       // 1. Crear cuenta en Supabase Auth
+      var siteUrl = window.location.origin + window.location.pathname;
       var signupResp = await fetch(SUPA_AUTH + '/signup', {
         method: 'POST',
         headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email, password: pass })
+        body: JSON.stringify({
+          email:            email,
+          password:         pass,
+          options: {
+            emailRedirectTo: siteUrl,
+            data: { nombre: nombre, unidad: unidad, rol: rol }
+          }
+        })
       });
       var signupData = await signupResp.json();
       if (!signupResp.ok) {
@@ -3109,7 +3151,7 @@ async function guardarUsuario(id) {
         return;
       }
 
-      // 2. Crear perfil en tabla usuarios (SIN username ni password)
+      // 2. Crear perfil en tabla usuarios
       await supaPost('usuarios', {
         id:     genUUID(),
         email:  email,
@@ -3119,7 +3161,7 @@ async function guardarUsuario(id) {
         activo: true
       });
 
-      showToast('Usuario creado. Puede iniciar sesión con ' + email, 'ok');
+      showToast('Usuario creado. Se envió un correo de verificación a ' + email + '. El usuario debe confirmar su correo antes de ingresar.', 'ok');
       closeModal();
       document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
       renderUsuariosPanel();
@@ -3154,12 +3196,13 @@ async function enviarResetPassword(email) {
   if (!email) { showToast('Este usuario no tiene correo registrado.', 'err'); return; }
   if (!confirm('¿Enviar correo de restablecimiento a ' + email + '?')) return;
   try {
+    var siteUrl = window.location.origin + window.location.pathname;
     var resp = await fetch(SUPA_AUTH + '/recover', {
       method: 'POST',
       headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email })
+      body: JSON.stringify({ email: email, gotrue_meta_security: {}, redirect_to: siteUrl })
     });
-    showToast(resp.ok ? 'Correo enviado a ' + email : 'No se pudo enviar el correo.', resp.ok ? 'ok' : 'err');
+    showToast(resp.ok ? 'Correo de restablecimiento enviado a ' + email + '. El enlace redirigirá al sistema.' : 'No se pudo enviar el correo.', resp.ok ? 'ok' : 'err');
   } catch(e) { showToast('Error: ' + e.message, 'err'); }
 }
 
@@ -3818,9 +3861,10 @@ function _ejecutarReporte() {
 function _generarReporteEstado(unidades, anioReporte, esGlobal) {
   var fecha   = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
   var titulo  = esGlobal ? 'Reporte General de Avance — DGCV' : 'Reporte por Unidad — DGCV';
-  var subtitulo = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · Año: ' + anioReporte;
   var anioActual = new Date().getFullYear();
-  var badgeLabel = anioReporte === anioActual ? String(anioReporte) + ' (Año Actual)' : String(anioReporte);
+  var anioLabel  = String(anioReporte) === 'todos' ? 'Todos los años' : (anioReporte === anioActual ? String(anioReporte) + ' (Año Actual)' : String(anioReporte));
+  var subtitulo  = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · ' + anioLabel;
+  var badgeLabel = anioLabel;
 
   // Filtrar proyectos por año: usa campo anioProyecto si existe,
   // sino infiere del nProceso o fechaInicio
