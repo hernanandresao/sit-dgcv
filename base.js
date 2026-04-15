@@ -21,7 +21,7 @@
   var loginScreen = document.getElementById('loginScreen');
   var resetScreen = document.getElementById('resetPasswordScreen');
   if (loginScreen) loginScreen.style.display = 'none';
-  if (resetScreen) resetScreen.style.display = 'flex';
+  if (resetScreen) { resetScreen.style.display = 'flex'; resetScreen.style.alignItems = 'center'; resetScreen.style.justifyContent = 'center'; }
 
   // Limpiar el hash de la URL sin recargar la página
   history.replaceState(null, '', window.location.pathname);
