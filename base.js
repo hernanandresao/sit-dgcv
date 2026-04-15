@@ -1,3 +1,91 @@
+// ═══════════════════════════════════════════════════════════
+//  PASSWORD RECOVERY — detectar token en URL y mostrar form
+// ═══════════════════════════════════════════════════════════
+(function _checkRecoveryToken() {
+  // Supabase redirige con #access_token=xxx&type=recovery
+  var hash = window.location.hash;
+  if (!hash) return;
+
+  var params = {};
+  hash.replace('#','').split('&').forEach(function(part) {
+    var kv = part.split('=');
+    params[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || '');
+  });
+
+  if (params.type !== 'recovery' || !params.access_token) return;
+
+  // Guardar el token para usarlo al cambiar la contraseña
+  window._recoveryToken = params.access_token;
+
+  // Ocultar login y mostrar pantalla de nueva contraseña
+  var loginScreen = document.getElementById('loginScreen');
+  var resetScreen = document.getElementById('resetPasswordScreen');
+  if (loginScreen) loginScreen.style.display = 'none';
+  if (resetScreen) resetScreen.style.display = 'flex';
+
+  // Limpiar el hash de la URL sin recargar la página
+  history.replaceState(null, '', window.location.pathname);
+})();
+
+async function doResetPassword() {
+  var pass1 = (document.getElementById('resetPass1') || {}).value || '';
+  var pass2 = (document.getElementById('resetPass2') || {}).value || '';
+  var errEl = document.getElementById('resetError');
+
+  var showErr = function(msg) {
+    if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
+  };
+
+  if (pass1.length < 8) return showErr('La contraseña debe tener al menos 8 caracteres.');
+  if (pass1 !== pass2)  return showErr('Las contraseñas no coinciden.');
+  if (!window._recoveryToken) return showErr('Token inválido. Solicite un nuevo correo de recuperación.');
+
+  var btn = document.querySelector('#resetPasswordScreen button');
+  if (btn) { btn.textContent = 'Guardando...'; btn.disabled = true; }
+  if (errEl) errEl.style.display = 'none';
+
+  try {
+    // Actualizar contraseña usando el token de recovery
+    var resp = await fetch(SUPA_AUTH + '/user', {
+      method: 'PUT',
+      headers: {
+        'apikey':        SUPA_KEY,
+        'Authorization': 'Bearer ' + window._recoveryToken,
+        'Content-Type':  'application/json'
+      },
+      body: JSON.stringify({ password: pass1 })
+    });
+
+    var data = await resp.json();
+
+    if (!resp.ok) {
+      showErr(data.msg || data.message || 'Error al cambiar la contraseña.');
+      if (btn) { btn.textContent = 'Guardar Nueva Contraseña'; btn.disabled = false; }
+      return;
+    }
+
+    // Éxito: ocultar pantalla de reset y mostrar login
+    window._recoveryToken = null;
+    var resetScreen = document.getElementById('resetPasswordScreen');
+    var loginScreen  = document.getElementById('loginScreen');
+    if (resetScreen) resetScreen.style.display = 'none';
+    if (loginScreen)  loginScreen.style.display = 'flex';
+
+    // Mostrar mensaje de éxito en el login
+    var loginError = document.getElementById('loginError');
+    if (loginError) {
+      loginError.textContent = '✓ Contraseña actualizada. Ya puede ingresar con su nueva contraseña.';
+      loginError.style.color = '#0D7A4E';
+      loginError.style.background = '#E3F5EE';
+      loginError.style.display = 'block';
+    }
+
+  } catch(e) {
+    showErr('Error de conexión: ' + e.message);
+    if (btn) { btn.textContent = 'Guardar Nueva Contraseña'; btn.disabled = false; }
+  }
+}
+
 'use strict';
 
 // ═══════════════════════════════════════════════════════════
