@@ -12,41 +12,17 @@
     params[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || '');
   });
 
-  // Confirmar registro de nuevo usuario
+  // Correo verificado — mostrar mensaje e indicar al usuario que espere activación
   if (params.type === 'signup' && params.access_token) {
     history.replaceState(null, '', window.location.pathname);
-
-    // Obtener el email del token y activar el perfil directamente
-    fetch(SUPA_AUTH + '/user', {
-      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + params.access_token }
-    })
-    .then(function(r){ return r.json(); })
-    .then(function(userData){
-      var email = userData && userData.email;
-      if (!email) return;
-      // Activar perfil usando la anon key con el token del usuario recién confirmado
-      return fetch(SUPA_URL + '/usuarios?email=eq.' + encodeURIComponent(email), {
-        method: 'PATCH',
-        headers: {
-          'apikey': SUPA_KEY,
-          'Authorization': 'Bearer ' + params.access_token,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify({ activo: true })
-      });
-    })
-    .catch(function(e){ console.warn('Error activando perfil:', e); });
-
-    // Mostrar login con mensaje de éxito
     var loginScreen = document.getElementById('loginScreen');
     if (loginScreen) loginScreen.style.display = 'flex';
     var loginError = document.getElementById('loginError');
     if (loginError) {
-      loginError.textContent = '\u2713 Correo verificado correctamente. Ya puede ingresar con sus credenciales.';
-      loginError.style.color = '#0D7A4E';
-      loginError.style.background = '#E3F5EE';
-      loginError.style.border = '1px solid #0D7A4E';
+      loginError.textContent = '\u2713 Correo verificado. Su cuenta está pendiente de activación por el administrador. Recibirá acceso en breve.';
+      loginError.style.color = '#B8620A';
+      loginError.style.background = '#FDF3E3';
+      loginError.style.border = '1px solid #D4A820';
       loginError.style.display = 'block';
     }
     return;
