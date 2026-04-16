@@ -1203,6 +1203,10 @@ function renderUnidad(u) {
           '<option value="construccion">Construcción</option>' +
           '<option value="supervision">Supervisión</option>' +
         '</select>' +
+        '<select class="filter-select" onchange="filterAnioTabla(this.value,\''+u+'\')" id="filter-anio-'+u+'">' +
+          '<option value="">Todos los años</option>' +
+          (function(){ var y=new Date().getFullYear(); var s=''; for(var i=y;i>=2024;i--) s+='<option value="'+i+'">'+i+'</option>'; return s; })() +
+        '</select>' +
         (permsNew.canAdd ? '<button class="btn btn-primary" onclick="openForm(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
       '</div>' +
       '<div style="overflow-x:auto"><table class="tbl" id="tbl-'+u+'">' +
@@ -1237,6 +1241,9 @@ function filterEstado(estado, u) {
 function filterTipo(tipo, u) {
   _applyFilters(u);
 }
+function filterAnioTabla(anio, u) {
+  _applyFilters(u);
+}
 
 function _applyFilters(u) {
   var plist    = DB[u] || [];
@@ -1257,12 +1264,16 @@ function _applyFilters(u) {
       if (allSelects[0]) estadoSel = allSelects[0].value;
     }
   }
+  var anioEl = document.getElementById('filter-anio-'+u);
+  var anioSel = anioEl ? anioEl.value : '';
+  function getAnioP(p){ if(p.anioProyecto) return String(p.anioProyecto); var m=(p.nProceso||p.noContrato||p.noContratoSup||'').match(/(\d{4})$/); return m?m[1]:''; }
   document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r, i) {
     var p = plist[i];
     if (!p) { r.style.display = 'none'; return; }
     var showEstado = !estadoSel || (p.estado || '') === estadoSel;
     var showTipo   = !tipoSel   || (p.tipoProyecto || 'construccion') === tipoSel;
-    r.style.display = (showEstado && showTipo) ? '' : 'none';
+    var showAnio   = !anioSel   || getAnioP(p) === anioSel;
+    r.style.display = (showEstado && showTipo && showAnio) ? '' : 'none';
   });
 }
 
@@ -2260,6 +2271,14 @@ function deleteProject(u, i) {
 function closeModal(e) {
   if (e && e.target) return; // Solo cierra con X o llamada directa
   document.getElementById('modalOverlay').classList.remove('open');
+  // Restaurar siempre el botón guardar a su estado original
+  var btnG = document.querySelector('.modal-footer .btn-primary');
+  if (btnG) {
+    btnG.disabled = false;
+    btnG.onclick  = saveProject;
+    btnG.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 7l3 3 7-6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Guardar';
+    btnG.style.display = '';
+  }
   editingId = null; endosoCount = 0; pagoCount = 0; modCount = 0;
 }
 function closeDetail(e) {
@@ -2906,7 +2925,8 @@ function _ejecutarReporte() {
   // Leer opciones
   var esGlobal  = document.getElementById('ropt-global').classList.contains('selected');
   var anioBtn   = document.querySelector('[data-anio].selected');
-  var anioReporte = anioBtn ? parseInt(anioBtn.getAttribute('data-anio')) : new Date().getFullYear();
+  var _anioRaw  = anioBtn ? anioBtn.getAttribute('data-anio') : String(new Date().getFullYear());
+  var anioReporte = _anioRaw === 'todos' ? 'todos' : parseInt(_anioRaw);
   var analisis = 'estado';
 
   // Unidades seleccionadas
@@ -2930,9 +2950,10 @@ function _ejecutarReporte() {
 function _generarReporteEstado(unidades, anioReporte, esGlobal) {
   var fecha   = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
   var titulo  = esGlobal ? 'Reporte General de Avance — DGCV' : 'Reporte por Unidad — DGCV';
-  var subtitulo = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · Año: ' + anioReporte;
   var anioActual = new Date().getFullYear();
-  var badgeLabel = anioReporte === anioActual ? String(anioReporte) + ' (Año Actual)' : String(anioReporte);
+  var anioLabel  = anioReporte === 'todos' ? 'Todos los años' : (anioReporte === anioActual ? String(anioReporte) + ' (Año Actual)' : String(anioReporte));
+  var subtitulo  = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · ' + anioLabel;
+  var badgeLabel = anioLabel;
 
   // Filtrar proyectos por año: usa campo anioProyecto si existe,
   // sino infiere del nProceso o fechaInicio
