@@ -1,37 +1,616 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════
-//  CONFIGURACIÓN SUPABASE
+//  SUPABASE — configuración
 // ═══════════════════════════════════════════════════════════
 var SUPA_PROJECT = 'https://furbzmtimdvsterqenff.supabase.co';
 var SUPA_URL     = SUPA_PROJECT + '/rest/v1';
 var SUPA_AUTH    = SUPA_PROJECT + '/auth/v1';
 var SUPA_KEY     = 'sb_publishable_v7rjxV61uvkibEfTDo6gJA_78Rzsocm';
+
+// JWT activo del usuario — se obtiene al login, se borra al logout
 var currentToken = null;
-var currentUser  = null;
 
-// Helper: GET con autenticación
-async function supaGet(table, query) {
+// Headers dinámicos — usan JWT si existe, anon key si no
+function buildHeaders(write) {
   var bearer = currentToken ? currentToken : SUPA_KEY;
-  var resp = await fetch(SUPA_URL + '/' + table + '?' + query, {
-    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + bearer }
-  });
-  return resp.json();
+  var h = {
+    'apikey':        SUPA_KEY,
+    'Authorization': 'Bearer ' + bearer,
+    'Content-Type':  'application/json'
+  };
+  if (write) h['Prefer'] = 'return=minimal';
+  return h;
 }
 
-// Helper: POST con autenticación
-async function supaPost(table, body) {
-  var bearer = currentToken ? currentToken : SUPA_KEY;
+// Generar UUID en el cliente
+function genUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+function supaGet(table, query) {
+  return fetch(SUPA_URL + '/' + table + '?' + (query || ''), {
+    method: 'GET', headers: buildHeaders(false)
+  }).then(function(r) {
+    return r.text().then(function(t) {
+      if (!r.ok) throw new Error('GET ' + table + ' [' + r.status + ']: ' + t);
+      return t ? JSON.parse(t) : [];
+    });
+  });
+}
+
+function supaPost(table, body) {
   return fetch(SUPA_URL + '/' + table, {
-    method: 'POST',
-    headers: {
-      'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + bearer,
-      'Content-Type': 'application/json', 'Prefer': 'return=minimal'
-    },
-    body: JSON.stringify(body)
+    method: 'POST', headers: buildHeaders(true), body: JSON.stringify(body)
+  }).then(function(r) {
+    return r.text().then(function(t) {
+      if (!r.ok) throw new Error('POST ' + table + ' [' + r.status + ']: ' + t);
+    });
   });
 }
 
+function supaPatch(table, id, body) {
+  return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
+    method: 'PATCH', headers: buildHeaders(true), body: JSON.stringify(body)
+  }).then(function(r) {
+    return r.text().then(function(t) {
+      if (!r.ok) throw new Error('PATCH ' + table + ' [' + r.status + ']: ' + t);
+    });
+  });
+}
+
+function supaDelete(table, id) {
+  return fetch(SUPA_URL + '/' + table + '?id=eq.' + id, {
+    method: 'DELETE', headers: buildHeaders(true)
+  }).then(function(r) {
+    if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CONSTANTES DEL SISTEMA
+// ═══════════════════════════════════════════════════════════
+// USERS ya no está hardcodeado — se consulta Supabase en el login
+var UNIDAD_NOMBRES = {
+  admin: 'Administración General',
+  rvp:   'Red Vial Pavimentada',
+  rvnp:  'Red Vial No Pavimentada',
+  rre:   'Respuesta Rápida a Emergencias',
+  fext:  'Fondos Externos/Nacionales',
+  fbcie: 'Fondos BCIE',
+  ldv:   'Limpieza de Derecho de Vía'
+};
+
+var UNIDADES = {
+  rvp:   { nombre:'Red Vial Pavimentada',            color:'#1268C4', bg:'#D6EBF9' },
+  rvnp:  { nombre:'Red Vial No Pavimentada',         color:'#0D7A4E', bg:'#E3F5EE' },
+  rre:   { nombre:'Respuesta Rápida a Emergencias',  color:'#C0392B', bg:'#FBEAEA' },
+  fext:  { nombre:'Fondos Externos/Nacionales',      color:'#0A6E5C', bg:'#E0F5F0' },
+  fbcie: { nombre:'Fondos BCIE',                      color:'#7A3500', bg:'#FFF0E0' },
+  ldv:   { nombre:'Limpieza de Derecho de Vía',      color:'#B8620A', bg:'#FDF3E3' }
+};
+
+var ESTADOS = ['En Ejecución','En Proceso / Contratación','Suspendido','Terminado'];
+var DEPTOS  = ['Atlántida','Choluteca','Colón','Comayagua','Copán','Cortés','El Paraíso',
+               'Francisco Morazán','Gracias a Dios','Intibucá','Islas de la Bahía','La Paz',
+               'Lempira','Ocotepeque','Olancho','Santa Bárbara','Valle','Yoro'];
+
+var MUNICIPIOS = {
+  "Atlántida": ["La Ceiba","Tela","El Porvenir","Esparta","Jutiapa","La Masica","San Francisco","Arizona"],
+  "Choluteca": ["Choluteca","Apacilagua","Concepción de María","Duyure","El Corpus","El Triunfo","Marcovia","Morolica","Namasigüe","Orocuina","Pespire","San Antonio de Flores","San Isidro","San José","San Marcos de Colón","Santa Ana de Yusguare"],
+  "Colón": ["Trujillo","Balfate","Iriona","Limón","Sabá","Santa Fe","Santa Rosa de Aguán","Sonaguera","Tocoa","Bonito Oriental"],
+  "Comayagua": ["Comayagua","Ajuterique","El Rosario","Esquías","Humuya","La Libertad","Lamaní","La Trinidad","Lejamaní","Meámbar","Minas de Oro","Ojos de Agua","San Jerónimo","San José de Comayagua","San José del Potrero","San Luis","San Sebastián","Siguatepeque","Villa de San Antonio","Las Lajas","Taulabé"],
+  "Copán": ["Santa Rosa de Copán","Cabañas","Concepción","Copán Ruinas","Corquín","Cucuyagua","Dolores","Dulce Nombre","El Paraíso","Florida","La Jigua","La Unión","Nueva Arcadia","San Agustín","San Antonio","San Jerónimo","San José","San Juan de Opoa","San Nicolás","San Pedro","Santa Rita","Trinidad de Copán","Veracruz"],
+  "Cortés": ["San Pedro Sula","Choloma","La Lima","Naco","Omoa","Pimienta","Potrerillos","Puerto Cortés","San Antonio de Cortés","San Francisco de Yojoa","San Manuel","Santa Cruz de Yojoa","Villanueva"],
+  "El Paraíso": ["Yuscarán","Alauca","Danlí","El Paraíso","Güinope","Jacaleapa","Liure","Morocelí","Oropolí","Potrerillos","San Antonio de Flores","San Lucas","San Matías","Soledad","Teupasenti","Texiguat","Vado Ancho","Yauyupe","Trojes"],
+  "Francisco Morazán": ["Tegucigalpa","Alubarén","Cedros","Curarén","El Porvenir","Guaimaca","La Libertad","La Venta","Lepaterique","Maraita","Marale","Nueva Armenia","Ojojona","Orica","Reitoca","Sabanagrande","San Antonio de Oriente","San Buenaventura","San Ignacio","San Juan de Flores","San Miguelito","Santa Ana","Santa Lucía","Talanga","Tatumbla","Valle de Ángeles","Villa de San Francisco","Vallecillo"],
+  "Gracias a Dios": ["Puerto Lempira","Brus Laguna","Ahuas","Juan Francisco Bulnes","Villeda Morales","Wampusirpe"],
+  "Intibucá": ["La Esperanza","Camasca","Colomoncagua","Concepción","Dolores","Intibucá","Jesús de Otoro","Magdalena","Masaguara","San Antonio","San Francisco de Opalaca","San Isidro","San Juan","San Marcos de la Sierra","San Miguelito","Santa Lucía","Yamaranguila","San Francisco del Valle"],
+  "Islas de la Bahía": ["Roatán","Guanaja","José Santos Guardiola","Utila"],
+  "La Paz": ["La Paz","Aguanqueterique","Cabañas","Cane","Chinacla","Guajiquiro","Lauterique","Marcala","Mercedes de Oriente","Opatoro","San Antonio del Norte","San José","San Juan","San Pedro de Tutule","Santa Ana","Santa Elena","Santa María","Santiago de Puringla","Yarula"],
+  "Lempira": ["Gracias","Belén","Candelaria","Cololaca","Erandique","Gualcince","Guarita","La Campa","La Iguala","Las Flores","La Unión","La Virtud","Lepaera","Mapulaca","Piraera","San Andrés","San Francisco","San Juan Guarita","San Manuel Colohete","San Rafael","San Sebastián","Santa Cruz","Talgua","Tambla","Tomalá","Valladolid","Virginia","San Marcos de Caiquín"],
+  "Ocotepeque": ["Ocotepeque","Belén Gualcho","Concepción","Dolores Merendón","Fraternidad","La Encarnación","La Labor","Lucerna","Mercedes","San Fernando","San Francisco del Valle","San Jorge","San Marcos","Santa Fe","Sensenti","Sinuapa"],
+  "Olancho": ["Juticalpa","Campamento","Catacamas","Concordia","Dulce Nombre de Culmí","El Rosario","Esquipulas del Norte","Gualaco","Guarizama","Guata","Guayape","Jano","La Unión","Mangulile","Manto","Salama","San Carlos","San Esteban","San Francisco de Becerra","San Francisco de la Paz","Santa María del Real","Silca","Yocón","Patuca"],
+  "Santa Bárbara": ["Santa Bárbara","Arada","Atima","Azacualpa","Ceguaca","Chinda","Concepción del Norte","Concepción del Sur","Gualala","Ilama","Macuelizo","Naranjito","Nuevo Celilac","Petoa","Quimistán","San Francisco de Ojuera","San José de Colinas","San Luis","San Marcos","San Nicolás","San Pedro Zacapa","San Vicente Centenario","Santa Rita","Trinidad","Las Vegas","El Níspero"],
+  "Valle": ["Nacaome","Alianza","Amapala","Aramecina","Caridad","Goascorán","Langue","San Francisco de Coray","San Lorenzo"],
+  "Yoro": ["Yoro","Arenal","El Negrito","El Progreso","Jocon","Morazán","Olanchito","Santa Rita","Sulaco","Victoria","Yorito"]
+};
+
+
+// ═══════════════════════════════════════════════════════════
+//  ESTADO DE LA APLICACIÓN
+// ═══════════════════════════════════════════════════════════
+var DB          = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
+var EMPRESAS    = { constructoras:[], supervisoras:[] }; // cache de empresas precalificadas
+var currentUser = null;
+var currentView = 'dashboard';
+var editingId   = null;
+var endosoCount = 0;
+var pagoCount   = 0;
+var modCount    = 0;
+var dbOnline    = false;
+var contratosSupervision = [];
+
+// ═══════════════════════════════════════════════════════════
+//  UTILIDADES
+// ═══════════════════════════════════════════════════════════
+function fmtL(n) {
+  var v = parseFloat(n);
+  if (isNaN(v)) return '—';
+  return v.toLocaleString('es-HN', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+
+function calcAvFin(p) {
+  var mI = parseFloat(p.montoContratoInicial) || 0;
+  var mM = parseFloat(p.montoModificacion) || 0;
+  var vig = mM > 0 ? mM : mI;
+  if (!vig) return 0;
+  var dev = parseFloat(p.totalDevengado) || 0;
+  return Math.min(parseFloat((dev / vig * 100).toFixed(2)), 100);
+}
+
+function fmtFecha(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString('es-HN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  catch(e) { return iso; }
+}
+
+function saveLocalDB() {
+  try { localStorage.setItem('sit_db', JSON.stringify(DB)); } catch(e) {}
+}
+
+function setDbStatus(online) {
+  dbOnline = online;
+  var dot = document.getElementById('syncDot');
+  var lbl = document.getElementById('syncLabel');
+  if (dot) dot.style.background = online ? '#4CAF50' : '#FFA726';
+  if (lbl) lbl.textContent = online ? 'Base de datos conectada ✓' : 'Sin conexión — datos locales';
+}
+
+function showToast(msg, type) {
+  var t = document.getElementById('toast');
+  if (!t) return;
+  t.innerHTML = '<span>' + msg + '</span>';
+  t.className = 'toast ' + (type || 'ok') + ' show';
+  clearTimeout(t._t);
+  t._t = setTimeout(function() { t.classList.remove('show'); }, 4000);
+}
+
+function showBanner(msg) {
+  var b = document.getElementById('successBanner');
+  if (!b) return;
+  b.textContent = msg;
+  b.classList.add('show');
+  clearTimeout(b._t);
+  b._t = setTimeout(function() { b.classList.remove('show'); }, 3500);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SUPABASE — OPERACIONES
+// ═══════════════════════════════════════════════════════════
+function cargarProyectos() {
+  return supaGet('proyectos', 'select=*&order=created_at.desc')
+    .then(function(rows) {
+      DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] };
+      (rows || []).forEach(function(row) {
+        var proj = Object.assign({}, row.data || {}, { _sid: row.id, _unidad: row.unidad });
+        if (DB[row.unidad]) DB[row.unidad].push(proj);
+      });
+      setDbStatus(true);
+      saveLocalDB();
+    })
+    .catch(function(e) {
+      console.warn('Supabase error:', e.message);
+      try { DB = JSON.parse(localStorage.getItem('sit_db') || '{"rvp":[],"rvnp":[],"rre":[],"fext":[],"fbcie":[],"ldv":[]}'); }
+      catch(ex) { DB = { rvp:[], rvnp:[], rre:[], fext:[], fbcie:[], ldv:[] }; }
+      setDbStatus(false);
+    });
+}
+
+function persistirProyecto(unidad, proj) {
+  var mI  = parseFloat(proj.montoContratoInicial) || 0;
+  var mM  = parseFloat(proj.montoModificacion) || 0;
+  var vig = mM > 0 ? mM : mI;
+
+  // Limpiar undefined del objeto antes de enviar a Supabase JSONB
+  var dataLimpia = JSON.parse(JSON.stringify(proj));
+
+  var row = {
+    unidad:            unidad,
+    proyecto:          proj.proyecto          || '',
+    departamento:      proj.departamento       || null,
+    estado:            proj.estado             || null,
+    avance_fisico:     parseFloat(proj.avanceFisico)     || 0,
+    avance_financiero: parseFloat(proj.avanceFinanciero) || 0,
+    total_devengado:   parseFloat(proj.totalDevengado)   || 0,
+    tipo_proyecto:     proj.tipoProyecto || 'construccion',
+    monto_vigente:     vig,
+    data:              dataLimpia
+  };
+
+  if (proj._sid) {
+    // UPDATE
+    return supaPatch('proyectos', proj._sid, row)
+      .then(function() { return proj._sid; });
+  } else {
+    // INSERT — UUID generado en cliente, no dependemos de la respuesta
+    var newId = genUUID();
+    row.id = newId;
+    return supaPost('proyectos', row)
+      .then(function() { return newId; });
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  EMPRESAS PRECALIFICADAS
+// ═══════════════════════════════════════════════════════════
+function cargarEmpresas() {
+  return supaGet('empresas', 'select=id,nombre,tipo,activa&activa=eq.true&order=nombre.asc')
+    .then(function(rows) {
+      EMPRESAS.constructoras = (rows||[]).filter(function(e){ return e.tipo==='constructora'||e.tipo==='ambas'; });
+      EMPRESAS.supervisoras  = (rows||[]).filter(function(e){ return e.tipo==='supervisora' ||e.tipo==='ambas'; });
+    })
+    .catch(function(e) {
+      console.warn('No se pudieron cargar empresas:', e.message);
+    });
+}
+
+// Renders a datalist-backed input with autocomplete from empresas
+function empresaInput(id, tipo, valor) {
+  var listId = 'dl-'+id;
+  var lista = tipo==='supervisora' ? EMPRESAS.supervisoras : EMPRESAS.constructoras;
+  var opts  = lista.map(function(e){ return '<option value="'+e.nombre.replace(/"/g,'&quot;')+'">'; }).join('');
+  return '<input type="text" id="'+id+'" value="'+valor+'" list="'+listId+'" placeholder="Escriba o seleccione..." autocomplete="off"/>'
+    +'<datalist id="'+listId+'">'+opts+'</datalist>';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CONTRATOS DE SUPERVISIÓN — helpers
+// ═══════════════════════════════════════════════════════════
+function cargarContratosSupervision() {
+  contratosSupervision = [];
+  Object.keys(DB).forEach(function(unidad) {
+    (DB[unidad] || []).forEach(function(p) {
+      if ((p.tipoProyecto || 'construccion') === 'supervision') {
+        contratosSupervision.push(p);
+      }
+    });
+  });
+}
+
+function buildTipoSelector() {
+  return '<div style="padding:4px 0 0">' +
+    '<p style="font-size:12px;color:var(--gris3);margin-bottom:18px;">Seleccione el tipo de registro que desea crear:</p>' +
+    '<div class="tipo-selector">' +
+      '<div class="tipo-card" onclick="selectTipoProyecto(\'construccion\')">' +
+        '<div class="tipo-card-icon" style="background:var(--az6);color:var(--az2);">' +
+          '<svg width="28" height="28" viewBox="0 0 16 16" fill="none"><rect x="1" y="9" width="10" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="4" y="6" width="5" height="3" rx=".5" stroke="currentColor" stroke-width="1.1"/><line x1="9" y1="7.5" x2="14" y2="5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="14" cy="4.5" r="1" stroke="currentColor" stroke-width="1.1"/><line x1="1" y1="3" x2="15" y2="3" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-dasharray="2 1.5"/></svg>' +
+        '</div>' +
+        '<div class="tipo-card-title">Registro de Construcción</div>' +
+        '<div class="tipo-card-desc">Contrato de obra, empresa constructora, supervisión asignada, garantías, avances y pagos</div>' +
+        '<div class="tipo-card-arrow">→</div>' +
+      '</div>' +
+      '<div class="tipo-card" onclick="selectTipoProyecto(\'supervision\')">' +
+        '<div class="tipo-card-icon" style="background:var(--verde-l);color:var(--verde);">' +
+          '<svg width="28" height="28" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/><path d="M1 14c0-3 2-5 5-5s5 2 5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M11 7l2 2 3-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+        '</div>' +
+        '<div class="tipo-card-title">Registro de Supervisión</div>' +
+        '<div class="tipo-card-desc">Contrato de supervisión, empresa supervisora, contratos que supervisa, garantías y pagos</div>' +
+        '<div class="tipo-card-arrow">→</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function selectTipoProyecto(tipo) {
+  editingId.tipo = tipo;
+  var u = editingId.u;
+  var p = {};
+  modCount = 0;
+  var titulo = tipo === 'construccion' ? 'Nuevo Proyecto de Construcción' : 'Nuevo Contrato de Supervisión';
+  document.getElementById('modalTitle').textContent = titulo + ' — ' + UNIDADES[u].nombre;
+  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
+  if (btnGuardar) btnGuardar.style.display = '';
+  function fv() { return ''; }
+  var deptoOpts  = DEPTOS.map(function(d)  { return '<option>'+d+'</option>'; }).join('');
+  var estadoOpts = ESTADOS.map(function(e) { return '<option>'+e+'</option>'; }).join('');
+  if (tipo === 'supervision') {
+    document.getElementById('modalBody').innerHTML = buildFormSupervision(u, p, fv, estadoOpts, deptoOpts);
+  } else {
+    document.getElementById('modalBody').innerHTML = buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts);
+    toggleSup('externa');
+  }
+  setTimeout(syncEstadoAvance, 0);
+  addPago();
+  updateFianzaOpts();
+  recalcPagos();
+}
+
+function onSelectContratoSupervision(sel) {
+  var sid    = sel.value;
+  var infoEl = document.getElementById('sup-ext-info');
+  if (!infoEl) return;
+  if (!sid) { infoEl.style.display = 'none'; return; }
+  var c = contratosSupervision.filter(function(s){ return s._sid === sid; })[0];
+  if (!c) { infoEl.style.display = 'none'; return; }
+  var unidLbl = UNIDADES[c._unidad] ? UNIDADES[c._unidad].nombre : c._unidad;
+  infoEl.style.display = 'block';
+  infoEl.innerHTML =
+    '<div style="background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:9px 12px;font-size:11px;display:flex;flex-wrap:wrap;gap:12px;">' +
+    '<span><span style="color:var(--gris3)">Empresa:</span> <strong>'+(c.supervisora||'—')+'</strong></span>' +
+    '<span><span style="color:var(--gris3)">N° Contrato:</span> <strong style="font-family:var(--mono)">'+(c.noContratoSup||'—')+'</strong></span>' +
+    '<span><span style="color:var(--gris3)">Unidad:</span> <strong>'+unidLbl+'</strong></span>' +
+    (c.contratosSupervisa ? '<span style="width:100%"><span style="color:var(--gris3)">Contratos que supervisa:</span> '+c.contratosSupervisa+'</span>' : '') +
+    '</div>';
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  FORMULARIO CONSTRUCCIÓN
+// ═══════════════════════════════════════════════════════════
+function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
+  var tipoSup = p.tipoSupervision || 'externa';
+  var haySupContratos = contratosSupervision.length > 0;
+  var supOpts = '<option value="">— Seleccione contrato de supervisión —</option>';
+  contratosSupervision.forEach(function(s) {
+    var unidLbl = UNIDADES[s._unidad] ? UNIDADES[s._unidad].nombre.split(' ').slice(0,2).join(' ') : s._unidad;
+    var lbl = (s.supervisora || '?') + ' — ' + (s.noContratoSup || 'S/N') + ' (' + unidLbl + ')';
+    supOpts += '<option value="'+(s._sid||'')+'"'+(p.contratoSupervisionId===s._sid?' selected':'')+'>'+lbl+'</option>';
+  });
+
+  return (
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6.5h5M4 4.5h5M4 8.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Datos Generales</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SITU-2025-001"/></div>' +
+      '<div class="form-group"><label>Estado del Proyecto <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
+      '<div class="form-group"><label>Año del Proyecto <span class="req">*</span></label><select id="f_anioProyecto">' +
+        (function(){ var y=new Date().getFullYear(); var s='<option value="">— Seleccione —</option>'; for(var i=y;i>=2024;i--) s+='<option value="'+i+'"'+(fv('anioProyecto')===String(i)?' selected':'')+'>'+i+'</option>'; return s; })() +
+      '</select></div>' +
+      '<div class="form-group span2"><label>Nombre del Proyecto <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Descripción completa del proyecto"/></div>' +
+      '<div class="form-group span2"><label>Descripción / Alcance <span class="req">*</span></label><textarea id="f_descripcion" rows="2">'+fv('descripcion')+'</textarea></div>' +
+    '</div>' +
+    '<div class="form-grid g4" style="margin-top:10px">' +
+      '<div class="form-group"><label>Longitud (km) <span class="req">*</span></label><input type="number" id="f_longitud" value="'+fv('longitud')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Beneficiarios</label><input type="number" id="f_beneficiarios" value="'+fv('beneficiarios')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Empleados Directos</label><input type="number" id="f_empleadosDirectos" value="'+fv('empleadosDirectos')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Empleados Indirectos</label><input type="number" id="f_empleadosIndirectos" value="'+fv('empleadosIndirectos')+'" min="0" step="1" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1C4.567 1 3 2.567 3 4.5c0 2.5 3.5 7.5 3.5 7.5S10 7 10 4.5C10 2.567 8.433 1 6.5 1z" stroke="currentColor" stroke-width="1.2"/><circle cx="6.5" cy="4.5" r="1.2" stroke="currentColor" stroke-width="1.2"/></svg>Ubicación Geográfica</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Departamento <span class="req">*</span></label><select id="f_departamento" onchange="actualizarMunicipios()"><option value="">— Seleccione —</option>'+deptoOpts+'</select></div>' +
+      '<div class="form-group"><label>Municipio <span class="req">*</span></label><select id="f_municipio"><option value="">— Seleccione departamento —</option></select></div>' +
+      '<div class="form-group"><label>Aldea / Barrio / Caserío <span class="req">*</span></label><input type="text" id="f_aldeaBarrio" value="'+fv('aldeaBarrio')+'"/></div>' +
+      '<div class="form-group"><label>Latitud GPS <span class="req">*</span></label><input type="text" id="f_latitud" value="'+fv('latitud')+'" placeholder="14.081389" oninput="this.value=this.value.replace(/[^0-9.\\-]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Longitud GPS <span class="req">*</span></label><input type="text" id="f_longitudRef" value="'+fv('longitudRef')+'" placeholder="-87.206944" oninput="this.value=this.value.replace(/[^0-9.\\-]/g,\'\')"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="5" width="11" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5V3a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.2"/></svg>Empresa Constructora</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Empresa Constructora <span class="req">*</span></label>'+empresaInput('f_constructora','constructora',fv('constructora'))+'</div>' +
+      '<div class="form-group"><label>N° de Contrato</label><input type="text" id="f_noContrato" value="'+fv('noContrato')+'"/></div>' +
+      '<div class="form-group"><label>Nombre del Coordinador <span class="req">*</span></label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 12c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Supervisión del Proyecto</div>' +
+    '<div style="display:flex;gap:10px;margin-bottom:12px">' +
+      '<label id="lbl-sup-ext" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
+        '<input type="radio" name="tipoSup" value="externa" '+(tipoSup==='externa'?'checked':'')+' onchange="toggleSup(\'externa\')" style="accent-color:var(--az2)"/>' +
+        '<div><div style="font-weight:500">Supervisión Externa</div><div style="font-size:10px;color:var(--gris3)">Empresa contratada</div></div>' +
+      '</label>' +
+      '<label id="lbl-sup-int" style="flex:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:400">' +
+        '<input type="radio" name="tipoSup" value="interna" '+(tipoSup==='interna'?'checked':'')+' onchange="toggleSup(\'interna\')" style="accent-color:var(--az2)"/>' +
+        '<div><div style="font-weight:500">Supervisión Interna</div><div style="font-size:10px;color:var(--gris3)">Personal DGCV</div></div>' +
+      '</label>' +
+    '</div>' +
+    '<div id="sup-ext-fields">' +
+      (haySupContratos
+        ? '<div class="form-group"><label>Contrato de Supervisión <span class="req">*</span></label>' +
+            '<select id="f_contratoSupervisionId" onchange="onSelectContratoSupervision(this)" style="width:100%">'+supOpts+'</select></div>' +
+            '<div id="sup-ext-info" style="margin-top:8px;display:none"></div>'
+        : '<div style="background:var(--amarillo-l);border:1px solid #d4a500;border-radius:6px;padding:10px 14px;font-size:11px;color:var(--amarillo);">' +
+            '<strong>Sin contratos de supervisión registrados.</strong> Para asignar supervisión externa, primero registre un contrato de supervisión.' +
+          '</div>' +
+          '<input type="hidden" id="f_contratoSupervisionId" value=""/>'
+      ) +
+    '</div>' +
+    '<div id="sup-int-fields" style="display:none">' +
+      '<div class="form-group"><label>Nombre del Supervisor de Campo <span class="req">*</span></label>' +
+        '<input type="text" id="f_supervisorCampo" value="'+fv('supervisorCampo')+'" placeholder="Nombre completo del supervisor de campo DGCV"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 1v2M9 1v2M1 6h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Fechas y Plazo de Ejecución</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Fecha de Adjudicación <span class="req">*</span></label><input type="date" id="f_fechaAdjudicacion" value="'+fv('fechaAdjudicacion')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Firma del Contrato</label><input type="date" id="f_fechaContrato" value="'+fv('fechaContrato')+'"/></div>' +
+      '<div class="form-group"><label>Plazo (días calendario)</label><input type="number" id="f_plazo" value="'+fv('plazo')+'" min="1" placeholder="365" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Fecha de Inicio de Obras</label><input type="date" id="f_fechaInicio" value="'+fv('fechaInicio')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Finalización Programada</label><input type="date" id="f_fechaFinObra" value="'+fv('fechaFinObra')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1L9 4H12L9.5 6.5L10.5 9.5L6.5 7.5L2.5 9.5L3.5 6.5L1 4H4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>Garantías / Fianzas</div>' +
+    '<div style="background:var(--az7);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--az2);margin-bottom:6px">GARANTÍA DE ANTICIPO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaAnticipo" value="'+fv('nFianzaAnticipo')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFA" value="'+fv('iniFA')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFA" value="'+fv('finFA')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaAnticipo" value="'+fv('montoFianzaAnticipo')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:var(--verde-l);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--verde);margin-bottom:6px">GARANTÍA DE CUMPLIMIENTO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCumplimiento" value="'+fv('nFianzaCumplimiento')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFC" value="'+fv('iniFC')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFC" value="'+fv('finFC')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCumplimiento" value="'+fv('montoFianzaCumplimiento')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:#FDF3E3;border-radius:6px;padding:10px 12px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--amarillo);margin-bottom:6px">GARANTÍA DE CALIDAD</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCalidad" value="'+fv('nFianzaCalidad')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFCal" value="'+fv('iniFCal')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFCal" value="'+fv('finFCal')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCalidad" value="'+fv('montoFianzaCalidad')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M2 10L5 7M5 7L8 10M5 7V3M10 3h1a1 1 0 010 2h-1M10 5v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Endosos de Garantías</div>' +
+    '<div id="endosos-container"></div>' +
+    '<button class="add-row-btn" onclick="addEndoso()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Endoso</button>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera y Avances</div>' +
+    '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+    '<input type="hidden" id="f_montoModificacion" value="'+fv('montoModificacion')+'"/>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Modificaciones / Órdenes de Cambio</div>' +
+    '<div id="mods-container"></div>' +
+    '<button class="add-row-btn" onclick="addModificacion()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Modificación / Orden de Cambio</button>' +
+    '<div class="form-grid g1" style="margin-top:10px">' +
+      '<div class="form-group"><label>Avance Físico de la Obra (%) <span class="req">*</span></label>' +
+        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">0%</span></div>' +
+        '<div class="form-hint">El avance financiero se calcula automáticamente desde los pagos</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
+    '<div id="pagos-container"></div>' +
+    '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
+    '<div class="totalizador" id="totalizador">' +
+      '<div class="tot-item"><strong id="tot-contrato">L 0.00</strong>Monto vigente</div>' +
+      '<div class="tot-item"><strong id="tot-devengado">L 0.00</strong>Total devengado</div>' +
+      '<div class="tot-item"><strong id="tot-deuda">L 0.00</strong>Deuda pendiente</div>' +
+      '<div class="tot-item"><strong id="tot-pct" style="color:var(--verde)">0.00%</strong>Avance financiero</div>' +
+    '</div>' +
+  '</div>'
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+//  FORMULARIO SUPERVISIÓN
+// ═══════════════════════════════════════════════════════════
+function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
+  return (
+  '<div class="form-section">' +
+    '<div class="form-section-title" style="color:var(--verde)"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 6.5h5M4 4.5h5M4 8.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Datos Generales del Contrato de Supervisión</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>N° Proceso de Contratación <span class="req">*</span></label><input type="text" id="f_nProceso" value="'+fv('nProceso')+'" placeholder="Ej. SUP-SITU-2025-001"/></div>' +
+      '<div class="form-group"><label>Estado <span class="req">*</span></label><select id="f_estado" onchange="syncEstadoAvance()"><option value="">— Seleccione —</option>'+estadoOpts+'</select></div>' +
+      '<div class="form-group"><label>Año del Proyecto <span class="req">*</span></label><select id="f_anioProyecto">' +
+        (function(){ var y=new Date().getFullYear(); var s='<option value="">— Seleccione —</option>'; for(var i=y;i>=2024;i--) s+='<option value="'+i+'"'+(fv('anioProyecto')===String(i)?' selected':'')+'>'+i+'</option>'; return s; })() +
+      '</select></div>' +
+      '<div class="form-group span2"><label>Nombre / Descripción del Contrato <span class="req">*</span></label><input type="text" id="f_proyecto" value="'+fv('proyecto')+'" placeholder="Ej. Supervisión de obras de pavimentación CA-5 Norte"/></div>' +
+      '<div class="form-group span2"><label>Alcance de la Supervisión <span class="req">*</span></label><textarea id="f_descripcion" rows="2" placeholder="Describa el alcance y objetivo de este contrato de supervisión">'+fv('descripcion')+'</textarea></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1C4.567 1 3 2.567 3 4.5c0 2.5 3.5 7.5 3.5 7.5S10 7 10 4.5C10 2.567 8.433 1 6.5 1z" stroke="currentColor" stroke-width="1.2"/><circle cx="6.5" cy="4.5" r="1.2" stroke="currentColor" stroke-width="1.2"/></svg>Área Geográfica de Cobertura</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Departamento <span class="req">*</span></label><select id="f_departamento" onchange="actualizarMunicipios()"><option value="">— Seleccione —</option>'+deptoOpts+'</select></div>' +
+      '<div class="form-group"><label>Municipio <span class="req">*</span></label><select id="f_municipio"><option value="">— Seleccione departamento —</option></select></div>' +
+      '<div class="form-group"><label>Aldea / Barrio / Caserío <span class="req">*</span></label><input type="text" id="f_aldeaBarrio" value="'+fv('aldeaBarrio')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title" style="color:var(--verde)"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M2 12c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Empresa Supervisora</div>' +
+    '<div class="form-grid g2">' +
+      '<div class="form-group"><label>Empresa Supervisora <span class="req">*</span></label>'+empresaInput('f_supervisora','supervisora',fv('supervisora'))+'</div>' +
+      '<div class="form-group"><label>N° de Contrato de Supervisión <span class="req">*</span></label><input type="text" id="f_noContratoSup" value="'+fv('noContratoSup')+'" placeholder="Ej. CS-DGCV-2025-001"/></div>' +
+      '<div class="form-group"><label>Coordinador de Supervisión</label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'" placeholder="Nombre del coordinador de la empresa supervisora"/></div>' +
+    '</div>' +
+    '<div class="form-group" style="margin-top:6px"><label>Contratos de Construcción que Supervisa</label>' +
+      '<textarea id="f_contratosSupervisa" rows="2" placeholder="Liste los N° de contratos de construcción que cubre esta supervisión. Ej: CONSTR-001, CONSTR-002">'+fv('contratosSupervisa')+'</textarea>' +
+      '<div class="form-hint">Estos contratos estarán disponibles al registrar proyectos de construcción con supervisión externa.</div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 1v2M9 1v2M1 6h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Fechas y Plazo del Contrato de Supervisión</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Fecha de Adjudicación <span class="req">*</span></label><input type="date" id="f_fechaAdjudicacion" value="'+fv('fechaAdjudicacion')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Firma del Contrato</label><input type="date" id="f_fechaContrato" value="'+fv('fechaContrato')+'"/></div>' +
+      '<div class="form-group"><label>Plazo (días calendario)</label><input type="number" id="f_plazo" value="'+fv('plazo')+'" min="1" placeholder="365" oninput="this.value=this.value.replace(/[^0-9]/g,\'\')"/></div>' +
+      '<div class="form-group"><label>Fecha de Inicio</label><input type="date" id="f_fechaInicio" value="'+fv('fechaInicio')+'"/></div>' +
+      '<div class="form-group"><label>Fecha de Finalización Programada</label><input type="date" id="f_fechaFinObra" value="'+fv('fechaFinObra')+'"/></div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1L9 4H12L9.5 6.5L10.5 9.5L6.5 7.5L2.5 9.5L3.5 6.5L1 4H4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>Garantías / Fianzas</div>' +
+    '<div style="background:var(--az7);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--az2);margin-bottom:6px">GARANTÍA DE ANTICIPO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaAnticipo" value="'+fv('nFianzaAnticipo')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFA" value="'+fv('iniFA')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFA" value="'+fv('finFA')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaAnticipo" value="'+fv('montoFianzaAnticipo')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:var(--verde-l);border-radius:6px;padding:10px 12px;margin-bottom:8px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--verde);margin-bottom:6px">GARANTÍA DE CUMPLIMIENTO</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCumplimiento" value="'+fv('nFianzaCumplimiento')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFC" value="'+fv('iniFC')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFC" value="'+fv('finFC')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCumplimiento" value="'+fv('montoFianzaCumplimiento')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="background:#FDF3E3;border-radius:6px;padding:10px 12px">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--amarillo);margin-bottom:6px">GARANTÍA DE CALIDAD</div>' +
+      '<div class="form-grid g3">' +
+        '<div class="form-group"><label>N° de Garantía</label><input type="text" id="f_nFianzaCalidad" value="'+fv('nFianzaCalidad')+'" oninput="updateFianzaOpts()"/></div>' +
+        '<div class="form-group"><label>Fecha Inicio Vigencia</label><input type="date" id="f_iniFCal" value="'+fv('iniFCal')+'"/></div>' +
+        '<div class="form-group"><label>Fecha Finalización</label><input type="date" id="f_finFCal" value="'+fv('finFCal')+'"/></div>' +
+        '<div class="form-group span3"><label>Monto (Lempiras)</label><input type="number" id="f_montoFianzaCalidad" value="'+fv('montoFianzaCalidad')+'" step="0.01" min="0" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');updateFianzaOpts()"/></div>' +
+      '</div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><path d="M2 10L5 7M5 7L8 10M5 7V3M10 3h1a1 1 0 010 2h-1M10 5v5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Endosos de Garantías</div>' +
+    '<div id="endosos-container"></div>' +
+    '<button class="add-row-btn" onclick="addEndoso()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Endoso</button>' +
+  '</div>' +
+  '<div class="form-section">' +
+    '<div class="form-section-title"><svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v6M4.5 5.5c0-.5.5-1 2-1s2 .8 2 1.5-.8 1-2 1-2 .8-2 1.5 1 1.5 2 1.5 2-.5 2-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>Información Financiera del Contrato de Supervisión</div>' +
+    '<div class="form-group"><label>Monto Contrato Inicial (L)</label><input type="number" id="f_montoContratoInicial" value="'+fv('montoContratoInicial')+'" step="0.01" min="0" placeholder="0.00" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+    '<input type="hidden" id="f_montoModificacion" value="'+fv('montoModificacion')+'"/>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Modificaciones / Órdenes de Cambio</div>' +
+    '<div id="mods-container"></div>' +
+    '<button class="add-row-btn" onclick="addModificacion()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Modificación / Orden de Cambio</button>' +
+    '<div class="form-grid g1" style="margin-top:10px">' +
+      '<div class="form-group"><label>Avance de Ejecución (%) <span class="req">*</span></label>' +
+        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--verde);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--verde);width:40px;text-align:right">0%</span></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
+    '<div id="pagos-container"></div>' +
+    '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
+    '<div class="totalizador" id="totalizador">' +
+      '<div class="tot-item"><strong id="tot-contrato">L 0.00</strong>Monto vigente</div>' +
+      '<div class="tot-item"><strong id="tot-devengado">L 0.00</strong>Total devengado</div>' +
+      '<div class="tot-item"><strong id="tot-deuda">L 0.00</strong>Deuda pendiente</div>' +
+      '<div class="tot-item"><strong id="tot-pct" style="color:var(--verde)">0.00%</strong>Avance financiero</div>' +
+    '</div>' +
+  '</div>'
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+//  AUTH
+// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  AUTH — Login con Supabase Auth (bcrypt + JWT)
+// ═══════════════════════════════════════════════════════════
 async function doLogin() {
   var unidad = document.getElementById('loginUnidad').value;
   var email  = (document.getElementById('loginEmail').value || '').trim().toLowerCase();
@@ -60,19 +639,7 @@ async function doLogin() {
 
     if (!authResp.ok) {
       err.style.display = 'block';
-      var errMsg = authData.error_description || authData.msg || authData.message || '';
-      if (errMsg.toLowerCase().includes('email not confirmed') ||
-          errMsg.toLowerCase().includes('not confirmed')) {
-        err.textContent = '⚠️ Su correo no ha sido verificado. Revise su bandeja de entrada y haga clic en el enlace de verificación.';
-        err.style.color = '#B8620A';
-        err.style.background = '#FDF3E3';
-        err.style.border = '1px solid #D4A820';
-      } else {
-        err.textContent = 'Correo o contraseña incorrectos.';
-        err.style.color = '';
-        err.style.background = '';
-        err.style.border = '';
-      }
+      err.textContent = 'Correo o contraseña incorrectos.';
       btn.textContent = 'Ingresar al Sistema';
       btn.disabled = false;
       return;
@@ -161,13 +728,11 @@ async function doLogin() {
     if (navEmpresas)        navEmpresas.style.display        = currentUser.esGlobalAdmin ? 'flex' : 'none';
     var reportBtn = document.getElementById('reportBtn');
     if (reportBtn) reportBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
-    var excelBtn = document.getElementById('excelBtn');
-    if (excelBtn) excelBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
 
     if (!currentUser.esAdmin && !currentUser.esGlobalViewer) {
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
         var v = el.id.replace('nav-', '');
-        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos' && v !== 'mapa') el.style.display = 'none';
+        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos') el.style.display = 'none';
       });
     }
 
@@ -539,12 +1104,6 @@ function renderUnidad(u) {
           '<option value="construccion">Construcción</option>' +
           '<option value="supervision">Supervisión</option>' +
         '</select>' +
-        '<select class="filter-select" onchange="filterAnio(this.value,\''+u+'\')" id="filter-anio-'+u+'">' +
-          '<option value="">Todos los años</option>' +
-          '<option value="2026">2026</option>' +
-          '<option value="2025">2025</option>' +
-          '<option value="2024">2024</option>' +
-        '</select>' +
         (permsNew.canAdd ? '<button class="btn btn-primary" onclick="openForm(\''+u+'\',null)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>Nuevo Proyecto</button>' : '') +
       '</div>' +
       '<div style="overflow-x:auto"><table class="tbl" id="tbl-'+u+'">' +
@@ -580,51 +1139,31 @@ function filterTipo(tipo, u) {
   _applyFilters(u);
 }
 
-function filterAnio(anio, u) {
-  _applyFilters(u);
-}
-
 function _applyFilters(u) {
-  var plist   = DB[u] || [];
-  var tipoEl  = document.getElementById('filter-tipo-'+u);
-  var anioEl  = document.getElementById('filter-anio-'+u);
-  var tipoSel = tipoEl  ? tipoEl.value  : '';
-  var anioSel = anioEl  ? anioEl.value  : '';
+  var plist    = DB[u] || [];
+  var estadoEl = document.querySelector('#tbl-'+u+' ~ * select.filter-select, .table-toolbar select.filter-select');
+  // Leer valores actuales de ambos filtros
   var estadoSel = '';
-
-  // Leer estado del primer select (sin id fijo) dentro del toolbar de esta unidad
+  var tipoSel   = '';
+  var selects   = document.querySelectorAll('.table-toolbar select.filter-select');
+  // Buscar el par de selects de esta unidad específica via IDs
+  var tipoEl = document.getElementById('filter-tipo-'+u);
+  if (tipoEl) tipoSel = tipoEl.value;
+  // Estado: primer select del toolbar (el que no tiene id)
   var tbodyEl = document.getElementById('tbody-'+u);
   if (tbodyEl) {
-    var wrapper = tbodyEl.closest('.table-wrap') || tbodyEl.closest('div');
-    while (wrapper && !wrapper.querySelector('.table-toolbar')) {
-      wrapper = wrapper.parentElement;
-    }
-    if (wrapper) {
-      var allSelects = wrapper.querySelectorAll('select.filter-select');
+    var toolbar = tbodyEl.closest('.table-wrap') ? tbodyEl.closest('.table-wrap').querySelector('.table-toolbar') : null;
+    if (toolbar) {
+      var allSelects = toolbar.querySelectorAll('select.filter-select');
       if (allSelects[0]) estadoSel = allSelects[0].value;
     }
   }
-
   document.querySelectorAll('#tbody-'+u+' tr').forEach(function(r, i) {
     var p = plist[i];
     if (!p) { r.style.display = 'none'; return; }
-
     var showEstado = !estadoSel || (p.estado || '') === estadoSel;
     var showTipo   = !tipoSel   || (p.tipoProyecto || 'construccion') === tipoSel;
-
-    // Filtro por año — usa anioProyecto; si no existe, infiere del nProceso
-    var showAnio = true;
-    if (anioSel) {
-      var anioP = String(p.anioProyecto || '');
-      if (!anioP) {
-        // Inferir del número de proceso (ej: CDE-SIT-087-2025 → 2025)
-        var m = (p.nProceso || p.noContrato || p.noContratoSup || '').match(/(\d{4})$/);
-        anioP = m ? m[1] : '';
-      }
-      showAnio = anioP === anioSel;
-    }
-
-    r.style.display = (showEstado && showTipo && showAnio) ? '' : 'none';
+    r.style.display = (showEstado && showTipo) ? '' : 'none';
   });
 }
 
@@ -737,33 +1276,7 @@ function openDetail(u, i) {
       '</div>' +
     '</div>' +
     '<div class="dp-section"><div class="dp-section-title">Pagos ('+(p.pagos||[]).length+')</div>' + pagosHtml + '</div>' +
-    '<div class="dp-section" id="dp-fotos-'+u+'-'+i+'">' +
-      '<div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">' +
-        '<span>Fotos del Proyecto</span>' +
-        (_puedeOperar(p) ? '<label class="foto-upload-btn" for="foto-input-'+u+'-'+i+'" title="Subir foto"><svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3.5 4.5l3-3 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 10v1a1 1 0 001 1h9a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg> Subir foto</label><input type="file" id="foto-input-'+u+'-'+i+'" accept="image/*" multiple style="display:none" onchange="subirFotos(this,\''+u+'\','+i+')"/>' : '') +
-      '</div>' +
-      '<div id="fotos-grid-'+u+'-'+i+'" class="fotos-grid">' +
-        _renderFotosGrid(p) +
-      '</div>' +
-    '</div>' +
-    // ── Registros de Avance ─────────────────────────────────
-    '<div class="dp-section" id="dp-avances-'+u+'-'+i+'">' +
-      '<div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">' +
-        '<span>Registros de Avance ('+(( p.registrosAvance||[]).length)+')</span>' +
-        (_puedeOperar(p) ? '<button onclick="abrirRegistroAvance(\''+u+'\','+i+')" style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--verde);background:var(--verde-l);border:1px solid #b7e4cc;padding:4px 12px;border-radius:5px;cursor:pointer;font-family:var(--font);">'+
-          '<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'+
-          'Registrar Avance'+
-        '</button>' : '') +
-      '</div>' +
-      '<div id="avances-lista-'+u+'-'+i+'">'+_renderAvancesLista(p, u, i)+'</div>' +
-    '</div>' +
-    '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>' +
-    '<div style="padding:18px 0 4px;display:flex;gap:8px;">' +
-      (_puedeOperar(p) ? '<button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="display:flex;align-items:center;justify-content:center;gap:8px;flex:1;padding:11px 16px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);">'+
-        '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="2" y="1" width="7" height="11" rx="1" stroke="white" stroke-width="1.2"/><path d="M4 4.5h4M4 6.5h4M4 8.5h2.5" stroke="white" stroke-width="1.1" stroke-linecap="round"/><path d="M8 1v2.5h2.5" stroke="white" stroke-width="1.1" stroke-linecap="round"/></svg>'+
-        'Ficha del Proyecto'+
-      '</button>' : '') +
-    '</div>';
+    '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>';
 
   document.getElementById('detailOverlay').classList.add('open');
 }
@@ -777,1006 +1290,6 @@ function toggleHistDetail(id) {
   var el = document.getElementById(id);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
-
-// Helper: admin o coordinador asignado al proyecto puede gestionar fotos/avances/fichas
-function _puedeGestionar(u, idx) {
-  if (!currentUser) return false;
-  if (currentUser.esGlobalAdmin || currentUser.esAdmin) return true;
-  var p = DB[u] && DB[u][idx];
-  if (!p) return false;
-  var nombreCoord = (p.coordinador || '').toLowerCase().trim();
-  var nombreUser  = (currentUser.nombre || '').toLowerCase().trim();
-  var emailUser   = (currentUser.email  || '').toLowerCase().trim();
-  return nombreCoord && (nombreCoord === nombreUser || nombreCoord.includes(emailUser) || emailUser.includes(nombreCoord));
-}
-
-
-// ═══════════════════════════════════════════════════════════
-//  REGISTROS DE AVANCE SEMANAL
-// ═══════════════════════════════════════════════════════════
-
-function _renderAvancesLista(p, u, idx) {
-  var registros = (p.registrosAvance || []);
-  if (!registros.length) {
-    return '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:12px 0;">Sin registros de avance. Use el botón para crear el primero.</div>';
-  }
-
-  // Totales acumulados
-  var totalKm  = registros.reduce(function(a, r) { return a + (parseFloat(r.kmIntervenidos) || 0); }, 0);
-  var lastAf   = parseFloat(registros[registros.length - 1].avanceFisico) || 0;
-  var kmTotal  = parseFloat(p.longitud) || 0;
-
-  var totalBanner =
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">' +
-      '<div style="text-align:center;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:8px 6px;">' +
-        '<div style="font-size:9px;color:var(--az2);font-weight:600;text-transform:uppercase;margin-bottom:2px;">Registros</div>' +
-        '<div style="font-size:16px;font-weight:300;color:var(--az1);font-family:var(--mono);">' + registros.length + '</div>' +
-      '</div>' +
-      '<div style="text-align:center;background:var(--verde-l);border:1px solid #b7e4cc;border-radius:6px;padding:8px 6px;">' +
-        '<div style="font-size:9px;color:var(--verde);font-weight:600;text-transform:uppercase;margin-bottom:2px;">KM acumulados</div>' +
-        '<div style="font-size:16px;font-weight:300;color:var(--verde);font-family:var(--mono);">' + totalKm.toFixed(2) + (kmTotal > 0 ? ' / ' + kmTotal.toFixed(2) : '') + '</div>' +
-      '</div>' +
-      '<div style="text-align:center;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:8px 6px;">' +
-        '<div style="font-size:9px;color:var(--az2);font-weight:600;text-transform:uppercase;margin-bottom:2px;">Avance actual</div>' +
-        '<div style="font-size:16px;font-weight:300;color:var(--az2);font-family:var(--mono);">' + lastAf.toFixed(1) + '%</div>' +
-      '</div>' +
-    '</div>';
-
-  var listaHtml = registros.slice().reverse().map(function(r, ri) {
-    var rIdx = (registros.length - 1) - ri;
-    var fotos = r.fotos || [];
-    var km    = parseFloat(r.kmIntervenidos) || 0;
-    var afAnterior = rIdx > 0 ? (parseFloat(registros[rIdx - 1].avanceFisico) || 0) : 0;
-    var delta = parseFloat(r.avanceFisico) - afAnterior;
-    var kmAcum = registros.slice(0, rIdx + 1).reduce(function(a, reg) { return a + (parseFloat(reg.kmIntervenidos) || 0); }, 0);
-
-    return '<div class="avance-registro">' +
-      '<div class="avance-registro-header">' +
-        '<div>' +
-          '<span class="avance-registro-fecha">' + (r.fechaCorte || r.fecha || '—') + '</span>' +
-          '<span class="avance-registro-autor"> · ' + (r.registradoPor || '') + '</span>' +
-        '</div>' +
-        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
-          '<span class="avance-fis-badge">Fís: ' + parseFloat(r.avanceFisico||0).toFixed(1) + '% ' +
-            (delta !== 0 ? '<span style="font-size:9px;opacity:.8;">' + (delta > 0 ? '▲' : '▼') + Math.abs(delta).toFixed(1) + '</span>' : '') +
-          '</span>' +
-          (km > 0 ? '<span style="font-size:10px;font-weight:600;color:var(--verde);background:var(--verde-l);padding:2px 8px;border-radius:8px;">' + km.toFixed(2) + ' km</span>' : '') +
-          (kmAcum > 0 ? '<span style="font-size:9px;color:var(--gris3);">acum: ' + kmAcum.toFixed(2) + ' km</span>' : '') +
-          (_puedeOperar(p) ? '<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>' : '') +
-          (currentUser && (currentUser.esAdmin || currentUser.esGlobalAdmin) ?
-            '<button onclick="eliminarRegistroAvance(\''+u+'\','+idx+','+rIdx+')" title="Eliminar este registro" style="background:none;border:1px solid var(--rojo-l);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--rojo);cursor:pointer;font-family:var(--font);">✕ Borrar</button>'
-          : '') +
-        '</div>' +
-      '</div>' +
-      (r.observaciones ? '<div class="avance-registro-obs">' + r.observaciones + '</div>' : '') +
-      (fotos.length ? '<div class="fotos-grid avance-fotos">' + fotos.map(function(f) {
-        return '<div class="foto-item"><img src="' + f.url + '" class="foto-thumb" onclick="_verFoto(\''+f.url+'\',\''+encodeURIComponent(f.descripcion||'')+'\')" />' +
-          '<div class="foto-meta"><div class="foto-desc">' + (f.descripcion||'') + '</div></div></div>';
-      }).join('') + '</div>' : '') +
-    '</div>';
-  }).join('');
-
-  return totalBanner + listaHtml;
-}
-
-// Modal de Registro de Avance
-function abrirRegistroAvance(u, idx) {
-  var p = DB[u] && DB[u][idx];
-  if (!p) return;
-  var esSup = p.tipoProyecto === 'supervision';
-  var nc = esSup ? (p.noContratoSup||'—') : (p.noContrato||'—');
-  var hoy      = new Date().toISOString().slice(0,10);
-  var afActual = parseFloat(p.avanceFisico) || 0;
-  var kmTotal  = parseFloat(p.longitud) || 0;
-  // KM acumulados hasta ahora
-  var kmAcumActual = (p.registrosAvance || []).reduce(function(a, r) { return a + (parseFloat(r.kmIntervenidos) || 0); }, 0);
-
-  document.getElementById('modalTitle').textContent = 'Registrar Avance — ' + nc;
-  document.getElementById('modalBody').innerHTML =
-    '<div style="font-size:11px;color:var(--gris3);margin-bottom:14px;">'+
-      'Proyecto: <strong style="color:var(--az1);">' + (p.proyecto||'').slice(0,70) + '</strong>'+
-      (kmTotal > 0 ? ' <span style="color:var(--verde);">('+kmTotal.toFixed(2)+' km totales · '+kmAcumActual.toFixed(2)+' km acum.)</span>' : '') +
-    '</div>' +
-
-    '<div class="form-grid g2" style="margin-bottom:12px;">' +
-      '<div class="form-group"><label>Fecha de Corte <span class="req">*</span></label>' +
-        '<input type="date" id="av-fecha" value="'+hoy+'"/></div>' +
-      '<div class="form-group"><label>KM Intervenidos en este avance <span class="req">*</span></label>' +
-        '<div style="display:flex;align-items:center;gap:8px;">' +
-          '<input type="number" id="av-km" value="" min="0" step="0.01" placeholder="0.00" style="flex:1;" oninput="_avKmUpdate()"/>' +
-          '<span style="font-size:12px;color:var(--gris3);white-space:nowrap;">km</span>' +
-        '</div>' +
-        (kmTotal > 0 ? '<div style="font-size:10px;color:var(--gris3);margin-top:3px;">Total proyecto: '+kmTotal.toFixed(2)+' km · Acumulado actual: '+kmAcumActual.toFixed(2)+' km</div>' : '') +
-      '</div>' +
-    '</div>' +
-
-    // Avance calculado automáticamente (solo lectura)
-    '<div style="background:var(--az7);border:1px solid var(--az6);border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">' +
-      '<div>' +
-        '<div style="font-size:10px;font-weight:600;color:var(--az2);text-transform:uppercase;margin-bottom:2px;">Avance Físico calculado</div>' +
-        '<div style="font-size:10px;color:var(--gris3);">'+(kmTotal>0?'KM acumulados / KM total del proyecto':'Ingrese KM para calcular automáticamente')+'</div>' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:10px;">' +
-        '<div style="width:120px;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden">' +
-          '<div id="av-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+Math.min(afActual,100)+'%"></div>' +
-        '</div>' +
-        '<span id="av-bar-lbl" style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--az2);min-width:48px;text-align:right">'+afActual.toFixed(1)+'%</span>' +
-        '<input type="hidden" id="av-fisico" value="'+afActual.toFixed(1)+'"/>' +
-      '</div>' +
-    '</div>' +
-
-    '<div class="form-group" style="margin-bottom:12px;"><label>Observaciones / Descripción del Avance</label>' +
-      '<textarea id="av-obs" rows="3" placeholder="Descripción de las actividades realizadas en el período..." style="width:100%;border:1px solid var(--border);border-radius:6px;padding:8px 11px;font-size:12px;font-family:var(--font);resize:vertical;outline:none;"></textarea>' +
-    '</div>' +
-
-    '<div class="form-group">' +
-      '<label>Fotos de este avance</label>' +
-      '<div id="av-fotos-preview" class="fotos-grid" style="min-height:50px;background:var(--gris6);border-radius:6px;border:1px dashed var(--border);padding:8px;margin-bottom:8px;">' +
-        '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:8px;">Sin fotos seleccionadas</div>' +
-      '</div>' +
-      '<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--az2);font-weight:600;padding:6px 14px;border:1px solid var(--az5);border-radius:6px;background:var(--az7);">' +
-        '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3.5 4.5l3-3 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 10v1a1 1 0 001 1h9a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>' +
-        'Seleccionar fotos...' +
-        '<input type="file" id="av-fotos-input" accept="image/*" multiple style="display:none" onchange="_avFotosPreview(this)"/>' +
-      '</label>' +
-    '</div>';
-
-  // Guardar referencia al proyecto actual
-  window._avEditRef = { u: u, idx: idx };
-
-  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
-  if (btnGuardar) {
-    btnGuardar.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 7l3.5 3.5L11 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> Guardar Avance';
-    btnGuardar.onclick = _guardarRegistroAvance;
-    btnGuardar.style.display = '';
-  }
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
-function _avBarUpdate() {
-  // Legacy — no-op (ahora usa _avKmUpdate)
-}
-function _avKmUpdate() {
-  var kmNuevo = parseFloat((document.getElementById('av-km') || {}).value) || 0;
-  var ref = window._avEditRef;
-  if (!ref) return;
-  var p = DB[ref.u] && DB[ref.u][ref.idx];
-  if (!p) return;
-  var kmTotal = parseFloat(p.longitud) || 0;
-  var kmAcum  = (p.registrosAvance || []).reduce(function(a, r) { return a + (parseFloat(r.kmIntervenidos) || 0); }, 0);
-  var avFis;
-  if (kmTotal > 0) {
-    avFis = Math.min(100, Math.round((kmAcum + kmNuevo) / kmTotal * 1000) / 10);
-  } else {
-    // Sin longitud definida: no se puede calcular, mantener avance actual
-    avFis = parseFloat(p.avanceFisico) || 0;
-  }
-  var bar = document.getElementById('av-bar');
-  var lbl = document.getElementById('av-bar-lbl');
-  var hid = document.getElementById('av-fisico');
-  if (bar) bar.style.width = Math.min(avFis, 100) + '%';
-  if (lbl) lbl.textContent = avFis.toFixed(1) + '%';
-  if (hid) hid.value = avFis.toFixed(1);
-}
-
-// Preview de fotos seleccionadas (antes de subir)
-var _avFotosSeleccionadas = [];
-function _avFotosPreview(input) {
-  _avFotosSeleccionadas = Array.from(input.files);
-  var preview = document.getElementById('av-fotos-preview');
-  if (!preview) return;
-  if (!_avFotosSeleccionadas.length) {
-    preview.innerHTML = '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:8px;">Sin fotos seleccionadas</div>';
-    return;
-  }
-  preview.innerHTML = '';
-  _avFotosSeleccionadas.forEach(function(file) {
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      var div = document.createElement('div');
-      div.className = 'foto-item';
-      div.innerHTML = '<img src="'+e.target.result+'" class="foto-thumb" style="height:80px;"/>' +
-        '<div class="foto-meta"><div class="foto-desc">'+file.name.slice(0,20)+'</div></div>';
-      preview.appendChild(div);
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-async function _guardarRegistroAvance() {
-  var ref = window._avEditRef;
-  if (!ref) return;
-  var u   = ref.u;
-  var idx = ref.idx;
-  var p   = DB[u] && DB[u][idx];
-  if (!p) return;
-
-  var fecha   = (document.getElementById('av-fecha')  || {}).value || '';
-  var avFis   = parseFloat((document.getElementById('av-fisico') || {}).value) || 0;
-  var kmInt   = parseFloat((document.getElementById('av-km')     || {}).value) || 0;
-  var obs     = (document.getElementById('av-obs')    || {}).value || '';
-
-  if (!fecha)        { showToast('Indique la fecha de corte.', 'err'); return; }
-  if (kmInt <= 0)    { showToast('Ingrese los KM intervenidos en este avance.', 'err'); return; }
-
-  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
-  if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...'; }
-
-  // Subir fotos del avance
-  var esSup   = p.tipoProyecto === 'supervision';
-  var noContr = (esSup ? (p.noContratoSup||'') : (p.noContrato||'')) || p.nProceso || 'sin-id';
-  noContr     = noContr.replace(/[^a-zA-Z0-9-]/g,'_');
-  var fechaTag= fecha.replace(/-/g,'');
-  var fotosSubidas = [];
-
-  for (var fi = 0; fi < _avFotosSeleccionadas.length; fi++) {
-    var file  = _avFotosSeleccionadas[fi];
-    var ext   = file.name.split('.').pop().toLowerCase() || 'jpg';
-    var path  = 'avances/' + noContr + '/' + fechaTag + '_' + fi + '.' + ext;
-    var blob  = file.size > 2*1024*1024 ? await _comprimirImagen(file, 1200, 0.82) : file;
-    try {
-      var resp = await fetch(STORAGE_URL + '/object/' + BUCKET + '/' + path, {
-        method:  'POST',
-        headers: { 'apikey':SUPA_KEY, 'Authorization':'Bearer '+currentToken,
-                   'Content-Type':file.type||'image/jpeg', 'x-upsert':'true' },
-        body: blob
-      });
-      if (resp.ok) {
-        var url = SUPA_PROJECT + '/storage/v1/object/public/' + BUCKET + '/' + path;
-        fotosSubidas.push({ url:url, path:path, descripcion:'Avance '+fecha });
-      }
-    } catch(e) { console.warn('Error subiendo foto de avance:', e); }
-  }
-
-  // Crear registro
-  var nuevoRegistro = {
-    id:              Date.now(),
-    fechaCorte:      fecha,
-    avanceFisico:    avFis,
-    kmIntervenidos:  kmInt || null,
-    observaciones:   obs,
-    fotos:           fotosSubidas,
-    registradoPor:   currentUser ? (currentUser.nombre || currentUser.email) : 'Usuario',
-    creadoEn:        new Date().toISOString()
-  };
-
-  var registros = p.registrosAvance || [];
-  registros.push(nuevoRegistro);
-
-  // Actualizar avance físico del proyecto con el último registro
-  p.registrosAvance = registros;
-  p.avanceFisico    = String(avFis);
-
-  var ok = await _guardarFotosEnDB(u, idx, p.fotos || []);  // reutiliza la función existente pero guarda todo el data
-  // En realidad necesitamos guardar todo el proyecto actualizado:
-  var sid = p._sid || (p.data && p.data._sid);
-  if (!sid) {
-    try {
-      var q = await fetch(SUPA_URL+'/proyectos?unidad=eq.'+u+'&data->>nProceso=eq.'+encodeURIComponent(p.nProceso)+'&select=id',
-        { headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken} });
-      var rows = await q.json();
-      if (rows && rows.length) sid = rows[0].id;
-    } catch(e) {}
-  }
-
-  var guardado = false;
-  if (sid) {
-    try {
-      var newData = Object.assign({}, p);
-      var pResp = await fetch(SUPA_URL+'/proyectos?id=eq.'+sid, {
-        method: 'PATCH',
-        headers: {'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,
-                  'Content-Type':'application/json','Prefer':'return=minimal'},
-        body: JSON.stringify({
-          data:          newData,
-          avance_fisico: avFis
-        })
-      });
-      guardado = pResp.ok;
-      if (pResp.ok) DB[u][idx] = newData;
-    } catch(e) {}
-  }
-
-  closeModal();
-  _avFotosSeleccionadas = [];
-
-  if (guardado) {
-    showToast('Avance registrado correctamente.', 'ok');
-    // Actualizar lista de avances en el panel
-    var listaEl = document.getElementById('avances-lista-'+u+'-'+idx);
-    if (listaEl) listaEl.innerHTML = _renderAvancesLista(p, u, idx);
-    // Actualizar título de sección
-    var secEl = document.getElementById('dp-avances-'+u+'-'+idx);
-    if (secEl) {
-      var title = secEl.querySelector('.dp-section-title span');
-      if (title) title.textContent = 'Registros de Avance (' + registros.length + ')';
-    }
-  } else {
-    showToast('Error al guardar. Intente de nuevo.', 'err');
-  }
-
-  // Restaurar botón guardar
-  var btnGuardar2 = document.querySelector('.modal-footer .btn-primary');
-  if (btnGuardar2) { btnGuardar2.disabled = false; btnGuardar2.onclick = saveProject; }
-}
-
-// Reporte HTML de un registro de avance específico
-async function eliminarRegistroAvance(u, idx, registroIdx) {
-  if (!confirm('¿Eliminar este registro de avance? Esta acción no se puede deshacer.')) return;
-
-  var p = DB[u] && DB[u][idx];
-  if (!p || !p.registrosAvance) return;
-
-  var registro = p.registrosAvance[registroIdx];
-  if (!registro) return;
-
-  // Eliminar fotos del storage si las tiene
-  var fotos = registro.fotos || [];
-  for (var fi = 0; fi < fotos.length; fi++) {
-    try {
-      await fetch(STORAGE_URL + '/object/' + BUCKET + '/' + fotos[fi].path, {
-        method: 'DELETE',
-        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
-      });
-    } catch(e) { console.warn('Error borrando foto:', e); }
-  }
-
-  // Eliminar del array
-  p.registrosAvance.splice(registroIdx, 1);
-
-  // Si quedan registros, actualizar avance físico al del último; si no, conservar el actual
-  if (p.registrosAvance.length > 0) {
-    var ultimo = p.registrosAvance[p.registrosAvance.length - 1];
-    p.avanceFisico = String(parseFloat(ultimo.avanceFisico) || 0);
-  }
-
-  // Guardar en Supabase
-  var sid = p._sid || (p.data && p.data._sid);
-  if (!sid) {
-    try {
-      var q = await fetch(SUPA_URL+'/proyectos?unidad=eq.'+u+'&data->>nProceso=eq.'+encodeURIComponent(p.nProceso)+'&select=id',
-        { headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken } });
-      var rows = await q.json();
-      if (rows && rows.length) sid = rows[0].id;
-    } catch(e) {}
-  }
-
-  if (sid) {
-    try {
-      var newData = Object.assign({}, p);
-      await fetch(SUPA_URL + '/proyectos?id=eq.' + sid, {
-        method: 'PATCH',
-        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken,
-                   'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ data: newData, avance_fisico: parseFloat(p.avanceFisico) || 0 })
-      });
-      DB[u][idx] = newData;
-    } catch(e) { showToast('Error al guardar cambios.', 'err'); return; }
-  }
-
-  // Actualizar vista
-  var listaEl = document.getElementById('avances-lista-' + u + '-' + idx);
-  if (listaEl) listaEl.innerHTML = _renderAvancesLista(p, u, idx);
-  var secEl = document.getElementById('dp-avances-' + u + '-' + idx);
-  if (secEl) {
-    var title = secEl.querySelector('.dp-section-title span');
-    if (title) title.textContent = 'Registros de Avance (' + p.registrosAvance.length + ')';
-  }
-  showToast('Registro eliminado.', 'ok');
-}
-
-
-function generarReporteAvance(u, idx, registroIdx) {
-  var p = DB[u] && DB[u][idx];
-  if (!p) return;
-  var r = p.registrosAvance && p.registrosAvance[registroIdx];
-  if (!r) return;
-
-  var esSup   = p.tipoProyecto === 'supervision';
-  var noContr = esSup ? (p.noContratoSup||'—') : (p.noContrato||'—');
-  var empresa = esSup ? (p.supervisora||'—')   : (p.constructora||'—');
-  var unidNombre = UNIDADES[u] ? UNIDADES[u].nombre : u;
-  var fechaGen = new Date().toLocaleDateString('es-HN', {day:'2-digit',month:'long',year:'numeric'});
-  var afAnt   = 0; // avance anterior (registro previo si existe)
-  if (registroIdx > 0 && p.registrosAvance[registroIdx-1]) {
-    afAnt = parseFloat(p.registrosAvance[registroIdx-1].avanceFisico) || 0;
-  }
-  var afActual = parseFloat(r.avanceFisico) || 0;
-  var afinActual = 0; // avance financiero ya no se usa en avances semanales
-  var mI = parseFloat(p.montoContratoInicial)||0;
-  var mM = parseFloat(p.montoModificacion)||0;
-  var vig= mM>0?mM:mI;
-  function fmtL(n){ var v=parseFloat(n); return isNaN(v)?'—':'L '+v.toLocaleString('es-HN',{minimumFractionDigits:2}); }
-
-  // Fotos del avance
-  var fotosHtml = (r.fotos||[]).map(function(f, fi) {
-    return '<div style="break-inside:avoid">' +
-      '<img src="'+f.url+'" style="width:100%;height:160px;object-fit:cover;border-radius:6px;border:1px solid #D0DCE6;"/>' +
-      '<div style="font-size:8pt;color:#7B8FA0;text-align:center;margin-top:4px;">'+(f.descripcion||'Foto '+(fi+1))+'</div>' +
-    '</div>';
-  }).join('');
-
-  function svgBar(pct, color) {
-    var w = Math.min(Math.max(pct,0),100)*2;
-    return '<svg width="100%" height="18" viewBox="0 0 300 18" preserveAspectRatio="none">'+
-      '<rect width="300" height="18" rx="9" fill="#e8ecf0"/>'+
-      '<rect width="'+w*1.5+'" height="18" rx="9" fill="'+color+'"/>'+
-      '<text x="150" y="13" text-anchor="middle" font-size="10" fill="white" font-family="Arial" font-weight="bold">'+pct.toFixed(1)+'%</text>'+
-    '</svg>';
-  }
-
-  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>'+
-  '<title>Reporte de Avance — '+noContr+' — '+r.fechaCorte+'</title>'+
-  '<style>'+
-  'body{font-family:Arial,sans-serif;color:#1C2B3A;font-size:11pt;margin:0;}'+
-  '.page{max-width:750px;margin:0 auto;padding:24px 32px;}'+
-  '.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:0;border-bottom:4px solid #D4A820;display:flex;}'+
-  '.hl{padding:18px 22px;flex:1;}'+'.hr{padding:18px 22px;text-align:right;min-width:160px;}'+
-  '.inst{font-size:8pt;opacity:.7;margin-bottom:1px;}'+
-  '.doc-title{font-size:15pt;font-weight:700;margin:3px 0 2px;}'+
-  '.periodo-badge{display:inline-block;background:rgba(13,122,78,.4);color:#2ecc71;font-size:8pt;font-weight:700;padding:2px 10px;border-radius:10px;}'+
-  '.nc{font-size:12pt;font-weight:700;font-family:monospace;}'+
-  '.section{margin:16px 0 0;}'+
-  '.sec-t{font-size:9pt;font-weight:700;color:#002B6B;padding:6px 12px;background:#EDF5FC;border-left:4px solid #D4A820;margin-bottom:0;}'+
-  '.sec-b{border:1px solid #D0DCE6;border-top:none;padding:12px 16px;}'+
-  '.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}'+
-  '.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}'+
-  '.lbl{font-size:8pt;color:#7B8FA0;font-weight:600;text-transform:uppercase;margin-bottom:2px;}'+
-  '.val{font-size:10pt;color:#1C2B3A;font-weight:500;}'+
-  '.kpi{text-align:center;background:#f8f9fb;border-radius:6px;padding:10px 8px;border:1px solid #e0e8f0;}'+
-  '.kpi-l{font-size:8pt;color:#7B8FA0;margin-bottom:3px;}'+
-  '.kpi-v{font-size:13pt;font-weight:700;font-family:monospace;}'+
-  '.delta{font-size:9pt;font-weight:600;text-align:center;margin-top:4px;}'+
-  '.obs{font-size:10pt;color:#1C2B3A;line-height:1.6;background:#f8f9fb;border-radius:6px;padding:10px 14px;border-left:3px solid #D4A820;}'+
-  'table{width:100%;border-collapse:collapse;font-size:9pt;}'+
-  'th{background:#f0f4f8;padding:6px 10px;text-align:left;font-size:8pt;color:#7B8FA0;font-weight:700;border-bottom:2px solid #D0DCE6;}'+
-  'td{padding:6px 10px;border-bottom:1px solid #f0f0f0;}'+
-  'tr:last-child td{border-bottom:none;}'+
-  '.footer{text-align:center;font-size:8pt;color:#aaa;margin-top:20px;padding-top:10px;border-top:1px solid #eee;}'+
-  '@media print{body{margin:0;}@page{margin:12mm 10mm;size:A4;} .section{page-break-inside:avoid;} img{page-break-inside:avoid;}}'+
-  '</style></head><body><div class="page">'+
-
-  '<div class="header">'+
-    '<div class="hl">'+
-      '<div class="inst">República de Honduras · Secretaría de Infraestructura y Transporte</div>'+
-      '<div class="inst">Dirección General de Conservación Vial — DGCV</div>'+
-      '<div class="doc-title">Reporte de Avance Semanal</div>'+
-      '<div class="periodo-badge">Corte: '+r.fechaCorte+'</div>'+
-    '</div>'+
-    '<div class="hr">'+
-      '<div style="font-size:8pt;opacity:.7;">Generado el</div>'+
-      '<div style="font-size:9pt;font-weight:600;">'+fechaGen+'</div>'+
-      '<div class="nc" style="margin-top:8px;">'+noContr+'</div>'+
-      '<div style="font-size:8pt;opacity:.7;margin-top:4px;">'+unidNombre.replace('Respuesta Rápida a Emergencias','Resp. Rápida')+'</div>'+
-    '</div>'+
-  '</div>'+
-
-  // Identificación
-  '<div class="section"><div class="sec-t">Identificación</div><div class="sec-b">'+
-    '<div class="g2">'+
-      '<div><div class="lbl">Proyecto</div><div class="val" style="font-size:10pt;">'+p.proyecto+'</div></div>'+
-      '<div><div class="lbl">Empresa</div><div class="val">'+empresa+'</div></div>'+
-      '<div><div class="lbl">Coordinador</div><div class="val">'+(p.coordinador||'—')+'</div></div>'+
-      '<div><div class="lbl">Registrado por</div><div class="val">'+r.registradoPor+'</div></div>'+
-    '</div>'+
-  '</div></div>'+
-
-  // KPIs de avance
-  (function() {
-    var kmEsteAv  = parseFloat(r.kmIntervenidos) || 0;
-    var kmAcumRep = p.registrosAvance.slice(0, registroIdx + 1).reduce(function(a, reg) { return a + (parseFloat(reg.kmIntervenidos)||0); }, 0);
-    var kmTotProy = parseFloat(p.longitud) || 0;
-    return '<div class="section"><div class="sec-t">Avance al '+r.fechaCorte+'</div><div class="sec-b">' +
-      '<div class="g3" style="margin-bottom:14px;">' +
-        '<div class="kpi"><div class="kpi-l">Avance Físico</div><div class="kpi-v" style="color:#1268C4;">'+afActual.toFixed(1)+'%</div>'+
-          (registroIdx>0?'<div class="delta" style="color:'+(afActual-afAnt>=0?'#0D7A4E':'#C0392B')+'">'+(afActual-afAnt>=0?'▲':'▼')+' '+Math.abs(afActual-afAnt).toFixed(1)+'% vs período ant.</div>':'')+
-        '</div>'+
-        (kmEsteAv>0?'<div class="kpi"><div class="kpi-l">KM este período</div><div class="kpi-v" style="color:#0D7A4E;">'+kmEsteAv.toFixed(2)+' km</div></div>':'<div class="kpi"><div class="kpi-l">Monto Vigente</div><div class="kpi-v" style="color:#001233;font-size:11pt;">'+fmtL(vig)+'</div></div>')+
-        (kmAcumRep>0?'<div class="kpi"><div class="kpi-l">KM acumulados'+(kmTotProy>0?' / '+kmTotProy.toFixed(2)+' km':'')+' </div><div class="kpi-v" style="color:#002B6B;">'+kmAcumRep.toFixed(2)+' km</div></div>':'<div></div>')+
-      '</div>'+
-      '<div style="margin-bottom:8px;"><div class="lbl" style="margin-bottom:4px;">Avance Físico</div>'+svgBar(afActual,'#1268C4')+'</div>'+
-      (kmTotProy>0&&kmAcumRep>0?'<div><div class="lbl" style="margin-bottom:4px;">KM Intervenidos acumulados</div>'+svgBar(Math.min(kmAcumRep/kmTotProy*100,100),'#0D7A4E')+'</div>':'')+
-    '</div></div>';
-  })() +
-
-  // Observaciones
-  (r.observaciones?
-  '<div class="section"><div class="sec-t">Observaciones y Actividades del Período</div><div class="sec-b">'+
-    '<div class="obs">'+r.observaciones+'</div>'+
-  '</div></div>':'') +
-
-  // Historial de avances anteriores
-  (p.registrosAvance && p.registrosAvance.length > 1 ?
-  '<div class="section"><div class="sec-t">Evolución del Avance</div><div class="sec-b" style="padding:0;overflow:auto;">'+
-    '<table><thead><tr><th>#</th><th>Fecha de Corte</th><th>Av. Físico</th><th>Av. Financiero</th><th>Registrado por</th></tr></thead>'+
-    '<tbody>'+p.registrosAvance.map(function(reg, ri) {
-      var esActual = ri === registroIdx;
-      return '<tr style="'+(esActual?'background:#EDF5FC;font-weight:700;':'')+'">'  +
-        '<td>'+(ri+1)+'</td>'+
-        '<td>'+reg.fechaCorte+'</td>'+
-        '<td style="font-family:monospace;color:#1268C4;">'+parseFloat(reg.avanceFisico||0).toFixed(1)+'%</td>'+
-        '<td style="font-family:monospace;color:'+(parseFloat(reg.avanceFisico||0)-(ri>0?parseFloat(p.registrosAvance[ri-1].avanceFisico)||0:0)>=0?'#0D7A4E':'#C0392B')+'">'+(function(){var d=parseFloat(reg.avanceFisico||0)-(ri>0?parseFloat(p.registrosAvance[ri-1].avanceFisico)||0:0);return (d>=0?'▲':'▼')+Math.abs(d).toFixed(1)+'%';})()+'</td>'+
-        '<td style="font-family:monospace;">'+( parseFloat(reg.kmIntervenidos||0)>0?parseFloat(reg.kmIntervenidos).toFixed(2)+' km':'—')+'</td>'+
-        '<td style="font-family:monospace;">'+(function(){var a=p.registrosAvance.slice(0,ri+1).reduce(function(s,rr){return s+(parseFloat(rr.kmIntervenidos)||0);},0);return a>0?a.toFixed(2)+' km':'—';})()+'</td>'+
-        '<td>'+reg.registradoPor+'</td>'+
-      '</tr>';
-    }).join('')+
-    '</tbody></table>'+
-  '</div></div>' : '') +
-
-  // Fotos
-  (fotosHtml ?
-  '<div class="section"><div class="sec-t">Registro Fotográfico ('+( r.fotos||[]).length+' foto'+((r.fotos||[]).length!==1?'s':'')+') </div>'+
-    '<div class="sec-b"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">'+fotosHtml+'</div></div></div>' : '')+
-
-  '<div class="footer">DGCV · Reporte de Avance Semanal · '+r.fechaCorte+' · Generado el '+fechaGen+'</div>'+
-  '</div></body></html>';
-
-  var win = window.open('','_blank');
-  win.document.write(html);
-  win.document.close();
-  win.document.title = 'Avance_'+noContr+'_'+r.fechaCorte;
-}
-
-
-// ═══════════════════════════════════════════════════════════
-//  FOTOS DE PROYECTO — Supabase Storage
-// ═══════════════════════════════════════════════════════════
-var STORAGE_URL = SUPA_PROJECT + '/storage/v1';
-var BUCKET      = 'fotos-proyectos';
-
-// Verifica si el usuario actual es admin O coordinador asignado al proyecto
-function _puedeOperar(p) {
-  if (!currentUser) return false;
-  // Admins siempre pueden
-  if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
-
-  // Coordinador de unidad: puede operar proyectos de su unidad
-  // (lógica más permisiva que editar — puede subir fotos, avances, reportes)
-  if (currentUser.esUnidadCoord) {
-    // Verificar que el proyecto pertenezca a su unidad
-    if (p._unidad && currentUser.unidad && p._unidad === currentUser.unidad) return true;
-    // O que el coordinador del proyecto coincida con su nombre/email
-  }
-
-  // Matching flexible: normalizar texto (sin tildes, minúsculas, sin espacios extra)
-  function norm(s) {
-    return (s||'').toLowerCase().trim()
-      .normalize('NFD').replace(/[̀-ͯ]/g,'')  // quitar tildes
-      .replace(/\s+/g,' ');
-  }
-  var nombre = norm(currentUser.nombre);
-  var email  = norm(currentUser.email);
-  var coord  = norm(p.coordinador);
-
-  if (!coord) return false;
-
-  // Coincidencia exacta o contenida
-  if (coord.includes(nombre) || nombre.includes(coord)) return true;
-  if (coord.includes(email)  || email.includes(coord))  return true;
-
-  // Coincidencia por primer apellido o primer nombre (tolerancia a nombre completo vs apodo)
-  var partsNombre = nombre.split(' ').filter(function(t){ return t.length > 2; });
-  var partsCoord  = coord.split(' ').filter(function(t){ return t.length > 2; });
-  return partsNombre.some(function(t){ return partsCoord.includes(t); });
-}
-
-
-function _renderFotosGrid(p) {
-  var fotos = p.fotos || [];
-  if (!fotos.length) {
-    return '<div class="fotos-empty">Sin fotos registradas. Haga clic en "Subir foto" para agregar.</div>';
-  }
-  return fotos.map(function(f, fi) {
-    return '<div class="foto-item">' +
-      '<img src="' + f.url + '" alt="' + (f.descripcion || 'Foto') + '" class="foto-thumb" onclick="_verFoto(\''+f.url+'\',\''+encodeURIComponent(f.descripcion||'')+'\')" />' +
-      '<div class="foto-meta">' +
-        '<div class="foto-fecha">' + (f.fecha || '') + '</div>' +
-        '<div class="foto-desc">' + (f.descripcion || '') + '</div>' +
-      '</div>' +
-      (_puedeOperar(p) ?
-        '<button class="foto-del" onclick="eliminarFoto(event,this,\''+f.path+'\',\''+f.url+'\')" title="Eliminar">✕</button>' : '') +
-    '</div>';
-  }).join('');
-}
-
-function _verFoto(url, desc) {
-  var decoded = decodeURIComponent(desc);
-  var ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;cursor:zoom-out;';
-  ov.onclick = function() { document.body.removeChild(ov); };
-  ov.innerHTML =
-    '<img src="'+url+'" style="max-width:90vw;max-height:80vh;border-radius:6px;box-shadow:0 8px 40px rgba(0,0,0,.5);" />' +
-    (decoded ? '<div style="color:#fff;font-size:13px;background:rgba(0,0,0,.5);padding:6px 14px;border-radius:20px;">'+decoded+'</div>' : '');
-  document.body.appendChild(ov);
-}
-
-async function subirFotos(input, u, idx) {
-  var files = Array.from(input.files);
-  if (!files.length) return;
-
-  var p = DB[u] && DB[u][idx];
-  if (!p) return;
-  var noContr = (p.noContrato || p.noContratoSup || p.nProceso || 'sin-contrato').replace(/[^a-zA-Z0-9-]/g,'_');
-
-  showToast('Subiendo ' + files.length + ' foto(s)...', 'ok');
-
-  // Pedir descripción opcional
-  var desc = prompt('Descripción de las fotos (opcional):', '') || '';
-  var fechaHoy = new Date().toISOString().slice(0, 10);
-
-  var fotos = p.fotos || [];
-  var errores = 0;
-
-  for (var fi = 0; fi < files.length; fi++) {
-    var file  = files[fi];
-    var ext   = file.name.split('.').pop().toLowerCase();
-    var path  = noContr + '/' + Date.now() + '_' + fi + '.' + ext;
-
-    // Comprimir si es mayor de 2MB
-    var blob = file;
-    if (file.size > 2 * 1024 * 1024) {
-      blob = await _comprimirImagen(file, 1200, 0.82);
-    }
-
-    try {
-      var resp = await fetch(STORAGE_URL + '/object/' + BUCKET + '/' + path, {
-        method: 'POST',
-        headers: {
-          'apikey':        SUPA_KEY,
-          'Authorization': 'Bearer ' + currentToken,
-          'Content-Type':  file.type || 'image/jpeg',
-          'x-upsert':      'true'
-        },
-        body: blob
-      });
-
-      if (resp.ok) {
-        var url = SUPA_PROJECT + '/storage/v1/object/public/' + BUCKET + '/' + path;
-        fotos.push({ url: url, path: path, descripcion: desc, fecha: fechaHoy });
-      } else {
-        var err = await resp.json().catch(function(){return {};});
-        console.error('Error subiendo foto:', err);
-        errores++;
-      }
-    } catch(e) {
-      console.error('Error subiendo foto:', e);
-      errores++;
-    }
-  }
-
-  if (fotos.length > (p.fotos || []).length) {
-    // Guardar en Supabase
-    p.fotos = fotos;
-    var ok = await _guardarFotosEnDB(u, idx, fotos);
-    if (ok) {
-      // Actualizar grid
-      var grid = document.getElementById('fotos-grid-'+u+'-'+idx);
-      if (grid) grid.innerHTML = _renderFotosGrid(p);
-      showToast((fotos.length - (errores > 0 ? errores : 0)) + ' foto(s) subida(s) correctamente.', 'ok');
-    } else {
-      showToast('Fotos subidas al storage pero error al guardar referencias. Intente de nuevo.', 'err');
-    }
-  }
-  if (errores > 0) showToast(errores + ' foto(s) no se pudieron subir.', 'err');
-
-  // Limpiar input
-  input.value = '';
-}
-
-async function _comprimirImagen(file, maxW, calidad) {
-  return new Promise(function(resolve) {
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      var img = new Image();
-      img.onload = function() {
-        var ratio = Math.min(maxW / img.width, maxW / img.height, 1);
-        var canvas = document.createElement('canvas');
-        canvas.width  = Math.round(img.width  * ratio);
-        canvas.height = Math.round(img.height * ratio);
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(resolve, 'image/jpeg', calidad);
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-async function _guardarFotosEnDB(u, idx, fotos) {
-  var p   = DB[u][idx];
-  var sid = p._sid || (p.data && p.data._sid);
-  if (!sid) {
-    // Buscar el ID real en Supabase por nProceso
-    try {
-      var q = await fetch(SUPA_URL + '/proyectos?unidad=eq.'+u+'&data->>nProceso=eq.'+encodeURIComponent(p.nProceso)+'&select=id', {
-        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
-      });
-      var rows = await q.json();
-      if (rows && rows.length) sid = rows[0].id;
-    } catch(e) { return false; }
-  }
-  if (!sid) return false;
-
-  try {
-    var newData = Object.assign({}, p, { fotos: fotos });
-    var resp = await fetch(SUPA_URL + '/proyectos?id=eq.' + sid, {
-      method:  'PATCH',
-      headers: {
-        'apikey':        SUPA_KEY,
-        'Authorization': 'Bearer ' + currentToken,
-        'Content-Type':  'application/json',
-        'Prefer':        'return=minimal'
-      },
-      body: JSON.stringify({ data: newData })
-    });
-    if (resp.ok) {
-      // Actualizar DB local
-      DB[u][idx] = newData;
-      return true;
-    }
-    return false;
-  } catch(e) { return false; }
-}
-
-async function eliminarFoto(event, btn, path, url) {
-  event.stopPropagation();
-  if (!confirm('¿Eliminar esta foto? Esta acción no se puede deshacer.')) return;
-
-  // Encontrar unidad e idx desde el grid
-  var grid   = btn.closest('.fotos-grid');
-  if (!grid) return;
-  var gridId = grid.id; // "fotos-grid-rre-3"
-  var parts  = gridId.replace('fotos-grid-','').split('-');
-  // unidad puede tener guión: reconstruir
-  var idx    = parseInt(parts[parts.length - 1]);
-  var u      = parts.slice(0, parts.length - 1).join('-');
-  var p      = DB[u] && DB[u][idx];
-  if (!p) return;
-
-  // Eliminar del storage
-  try {
-    await fetch(STORAGE_URL + '/object/' + BUCKET + '/' + path, {
-      method:  'DELETE',
-      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + currentToken }
-    });
-  } catch(e) { console.warn('Error al borrar del storage:', e); }
-
-  // Eliminar de la lista local y guardar
-  p.fotos = (p.fotos || []).filter(function(f) { return f.url !== url; });
-  await _guardarFotosEnDB(u, idx, p.fotos);
-
-  // Actualizar grid
-  grid.innerHTML = _renderFotosGrid(p);
-  showToast('Foto eliminada.', 'ok');
-}
-
-
-// ═══════════════════════════════════════════════════════════
-//  FICHA DE PROYECTO — Genera documento DOCX editable
-// ═══════════════════════════════════════════════════════════
-function generarReporteProyecto(u, idx) {
-  var p   = DB[u] && DB[u][idx] ? DB[u][idx] : null;
-  if (!p) { showToast('No se encontró el proyecto.', 'err'); return; }
-
-  var esSup   = p.tipoProyecto === 'supervision';
-  var noContr = esSup ? (p.noContratoSup || '—') : (p.noContrato || '—');
-  var empresa = esSup ? (p.supervisora  || '—') : (p.constructora || '—');
-  var fecha   = new Date().toLocaleDateString('es-HN', {day:'2-digit', month:'long', year:'numeric'});
-  var mI      = parseFloat(p.montoContratoInicial) || 0;
-  var mM      = parseFloat(p.montoModificacion)    || 0;
-  var vigente = mM > 0 ? mM : mI;
-  var af      = parseFloat(p.avanceFisico)     || 0;
-  var afin    = parseFloat(p.avanceFinanciero) || 0;
-  var dev     = parseFloat(p.totalDevengado)   || 0;
-  var deuda   = parseFloat(p.deuda)            || 0;
-  var unidNombre = UNIDADES[u] ? UNIDADES[u].nombre : u;
-
-  function fmtL(n) {
-    var v = parseFloat(n);
-    return isNaN(v) ? '—' : 'L ' + v.toLocaleString('es-HN', {minimumFractionDigits:2, maximumFractionDigits:2});
-  }
-
-  // Modificaciones
-  var mods = (p.modificaciones && p.modificaciones.length) ? p.modificaciones
-           : (p.montoModificacion ? [{tipo:'Modificación',numero:'',monto:p.montoModificacion,plazo:'',fecha:'',descripcion:'Dato importado'}] : []);
-
-  var modsRows = mods.map(function(m, mi) {
-    return '<tr><td>'+(mi+1)+'</td><td>'+(m.tipo||'—')+'</td><td>'+(m.numero||'—')+'</td><td>'+fmtL(m.monto)+'</td><td>'+(m.plazo?m.plazo+' días':'—')+'</td><td>'+(m.fecha||'—')+'</td><td>'+(m.descripcion||'—')+'</td></tr>';
-  }).join('');
-
-  // Pagos
-  var pagosRows = (p.pagos||[]).map(function(pg, pi) {
-    return '<tr><td>'+(pi+1)+'</td><td>'+fmtL(pg.monto)+'</td><td>'+(pg.fechaIngreso||'—')+'</td><td>'+(pg.contexto||'—')+'</td></tr>';
-  }).join('');
-
-  // Fianzas
-  var fianzasRows = '';
-  if (p.nFianzaAnticipo)     fianzasRows += '<tr><td>Anticipo</td><td>'+p.nFianzaAnticipo+'</td><td>'+(p.iniFA||'—')+' → '+(p.finFA||'—')+'</td><td>'+fmtL(p.montoFianzaAnticipo)+'</td></tr>';
-  if (p.nFianzaCumplimiento) fianzasRows += '<tr><td>Cumplimiento</td><td>'+p.nFianzaCumplimiento+'</td><td>'+(p.iniFC||'—')+' → '+(p.finFC||'—')+'</td><td>'+fmtL(p.montoFianzaCumplimiento)+'</td></tr>';
-  if (p.nFianzaCalidad)      fianzasRows += '<tr><td>Calidad</td><td>'+p.nFianzaCalidad+'</td><td>'+(p.iniFCal||'—')+' → '+(p.finFCal||'—')+'</td><td>'+fmtL(p.montoFianzaCalidad)+'</td></tr>';
-  if (!fianzasRows)          fianzasRows  = '<tr><td colspan="4" style="text-align:center;color:#888;">Sin garantías registradas</td></tr>';
-
-  // Estado badge color
-  var estColor = {
-    'En Ejecución':'#0D7A4E','En Proceso / Contratación':'#1268C4',
-    'Suspendido':'#B8620A','Terminado':'#7B8FA0'
-  }[p.estado] || '#333';
-
-  // Barra de avance SVG helper
-  function svgBar(pct, color) {
-    var w = Math.min(Math.max(pct,0),100);
-    return '<svg width="200" height="14" viewBox="0 0 200 14"><rect width="200" height="14" rx="7" fill="#e8ecf0"/><rect width="'+w*2+'" height="14" rx="7" fill="'+color+'"/><text x="104" y="10" text-anchor="middle" font-size="9" fill="white" font-family="Arial" font-weight="bold">'+pct.toFixed(1)+'%</text></svg>';
-  }
-
-  var html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><title>Ficha — '+noContr+'</title>' +
-  '<style>' +
-  'body{font-family:Arial,sans-serif;color:#1C2B3A;font-size:11pt;margin:0;padding:0;}' +
-  '.page{max-width:750px;margin:0 auto;padding:28px 32px;}' +
-  '.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:0;border-bottom:4px solid #D4A820;margin-bottom:0;display:flex;align-items:stretch;}' +
-  '.header-left{padding:20px 24px;flex:1;}' +
-  '.header-right{padding:20px 24px;text-align:right;min-width:160px;display:flex;flex-direction:column;justify-content:space-between;}' +
-  '.inst{font-size:8pt;opacity:.7;margin-bottom:2px;}' +
-  '.doc-title{font-size:16pt;font-weight:700;margin:4px 0 2px;}' +
-  '.tipo-badge{display:inline-block;background:rgba(212,168,32,.3);color:#F0C040;font-size:8pt;font-weight:700;padding:2px 10px;border-radius:10px;letter-spacing:.5px;}' +
-  '.fecha-gen{font-size:8pt;opacity:.65;}' +
-  '.unidad-badge{font-size:8pt;background:rgba(255,255,255,.15);padding:3px 10px;border-radius:8px;margin-top:6px;display:inline-block;}' +
-  '.contrato-num{font-size:13pt;font-weight:700;font-family:monospace;letter-spacing:.5px;}' +
-  '.section{margin:18px 0 0;}' +
-  '.sec-title{font-size:9pt;font-weight:700;color:#002B6B;text-transform:uppercase;letter-spacing:.6px;padding:6px 12px;background:#EDF5FC;border-left:4px solid #D4A820;margin-bottom:0;}' +
-  '.sec-body{border:1px solid #D0DCE6;border-top:none;padding:14px 16px;}' +
-  '.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;}' +
-  '.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px;}' +
-  '.field-lbl{font-size:8pt;color:#7B8FA0;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px;}' +
-  '.field-val{font-size:10pt;color:#1C2B3A;font-weight:500;}' +
-  '.field-val.mono{font-family:monospace;}' +
-  '.estado-badge{display:inline-block;padding:3px 12px;border-radius:10px;font-size:9pt;font-weight:700;}' +
-  'table{width:100%;border-collapse:collapse;font-size:9pt;}' +
-  'th{background:#f0f4f8;padding:6px 10px;text-align:left;font-size:8pt;color:#7B8FA0;font-weight:700;border-bottom:2px solid #D0DCE6;}' +
-  'td{padding:6px 10px;border-bottom:1px solid #f0f0f0;}' +
-  'tr:last-child td{border-bottom:none;}' +
-  '.fin-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:2px;}' +
-  '.fin-box{text-align:center;background:#f8f9fb;border-radius:6px;padding:10px 8px;border:1px solid #e0e8f0;}' +
-  '.fin-lbl{font-size:8pt;color:#7B8FA0;margin-bottom:3px;}' +
-  '.fin-val{font-size:11pt;font-weight:700;font-family:monospace;}' +
-  '.avance-wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:2px;}' +
-  '.av-item{display:flex;flex-direction:column;gap:4px;}' +
-  '.av-lbl{font-size:8pt;color:#7B8FA0;font-weight:600;}' +
-  '.footer{text-align:center;font-size:8pt;color:#aaa;margin-top:24px;padding-top:12px;border-top:1px solid #eee;}' +
-  '@media print{body{margin:0;}@page{margin:12mm 10mm;size:A4;}}' +
-  '</style></head><body>' +
-  '<div class="page">' +
-
-  // Header
-  '<div class="header">' +
-    '<div class="header-left">' +
-      '<div class="inst">República de Honduras · Secretaría de Infraestructura y Transporte</div>' +
-      '<div class="inst">Dirección General de Conservación Vial — DGCV</div>' +
-      '<div class="doc-title">Ficha de Proyecto</div>' +
-      '<div class="tipo-badge">'+(esSup?'SUPERVISIÓN':'CONSTRUCCIÓN')+'</div>' +
-    '</div>' +
-    '<div class="header-right">' +
-      '<div>' +
-        '<div class="fecha-gen">Generado el</div>' +
-        '<div style="font-size:9pt;font-weight:600;">'+fecha+'</div>' +
-      '</div>' +
-      '<div class="contrato-num">'+noContr+'</div>' +
-      '<div class="unidad-badge">'+unidNombre.replace('Respuesta Rápida a Emergencias','Resp. Rápida')+'</div>' +
-    '</div>' +
-  '</div>' +
-
-  // 1. Identificación
-  '<div class="section"><div class="sec-title">1. Identificación del Proyecto</div><div class="sec-body">' +
-    '<div style="margin-bottom:10px"><div class="field-lbl">Nombre del Proyecto</div><div class="field-val" style="font-size:11pt;font-weight:600;">'+( p.proyecto||'—')+'</div></div>' +
-    '<div class="grid3">' +
-      '<div><div class="field-lbl">N° Proceso</div><div class="field-val mono">'+(p.nProceso||'—')+'</div></div>' +
-      '<div><div class="field-lbl">N° Contrato</div><div class="field-val mono">'+noContr+'</div></div>' +
-      '<div><div class="field-lbl">Estado</div><div><span class="estado-badge" style="background:'+estColor+'22;color:'+estColor+';">'+(p.estado||'—')+'</span></div></div>' +
-      '<div><div class="field-lbl">Año</div><div class="field-val">'+(p.anioProyecto||'—')+'</div></div>' +
-      '<div><div class="field-lbl">Tipo</div><div class="field-val">'+(esSup?'Supervisión':'Construcción')+'</div></div>' +
-      (p.longitud ? '<div><div class="field-lbl">Longitud</div><div class="field-val">'+p.longitud+' km</div></div>' : '') +
-    '</div>' +
-  '</div></div>' +
-
-  // 2. Ubicación
-  '<div class="section"><div class="sec-title">2. Ubicación Geográfica</div><div class="sec-body">' +
-    '<div class="grid3">' +
-      '<div><div class="field-lbl">Departamento</div><div class="field-val">'+(p.departamento||'—')+'</div></div>' +
-      '<div><div class="field-lbl">Municipio</div><div class="field-val">'+(p.municipio||'—')+'</div></div>' +
-      '<div><div class="field-lbl">Aldea / Barrio</div><div class="field-val">'+(p.aldeaBarrio||'—')+'</div></div>' +
-      (p.latitud ? '<div><div class="field-lbl">Latitud</div><div class="field-val mono">'+p.latitud+'</div></div>' : '') +
-      (p.longitudRef ? '<div><div class="field-lbl">Longitud GPS</div><div class="field-val mono">'+p.longitudRef+'</div></div>' : '') +
-    '</div>' +
-  '</div></div>' +
-
-  // 3. Empresa y personal
-  '<div class="section"><div class="sec-title">3. '+(esSup?'Empresa Supervisora':'Empresa Constructora y Supervisión')+'</div><div class="sec-body">' +
-    '<div class="grid2">' +
-      '<div><div class="field-lbl">'+(esSup?'Supervisora':'Constructora')+'</div><div class="field-val">'+empresa+'</div></div>' +
-      '<div><div class="field-lbl">Coordinador</div><div class="field-val">'+(p.coordinador||'—')+'</div></div>' +
-      (esSup ? '<div><div class="field-lbl">Contratos que Supervisa</div><div class="field-val mono" style="font-size:9pt;">'+(p.contratosSupervisa||'—')+'</div></div>' : '') +
-      (!esSup && p.tipoSupervision ? '<div><div class="field-lbl">Tipo de Supervisión</div><div class="field-val">'+(p.tipoSupervision==='interna'?'Interna DGCV':'Externa')+'</div></div>' : '') +
-      (!esSup && p.supervisorCampo ? '<div><div class="field-lbl">Supervisor de Campo</div><div class="field-val">'+p.supervisorCampo+'</div></div>' : '') +
-      (!esSup && p.supervisora && p.tipoSupervision==='externa' ? '<div><div class="field-lbl">Empresa Supervisora</div><div class="field-val">'+p.supervisora+'</div></div>' : '') +
-    '</div>' +
-  '</div></div>' +
-
-  // 4. Fechas y plazo
-  '<div class="section"><div class="sec-title">4. Fechas y Plazo de Ejecución</div><div class="sec-body">' +
-    '<div class="grid3">' +
-      '<div><div class="field-lbl">Fecha Adjudicación</div><div class="field-val">'+(p.fechaAdjudicacion||'—')+'</div></div>' +
-      '<div><div class="field-lbl">Fecha de Contrato</div><div class="field-val">'+(p.fechaContrato||'—')+'</div></div>' +
-      '<div><div class="field-lbl">Fecha de Inicio</div><div class="field-val">'+(p.fechaInicio||'—')+'</div></div>' +
-      '<div><div class="field-lbl">Plazo (días)</div><div class="field-val">'+(p.plazo?p.plazo+' días':'—')+'</div></div>' +
-      '<div><div class="field-lbl">Fecha Fin Programada</div><div class="field-val">'+(p.fechaFinObra||'—')+'</div></div>' +
-    '</div>' +
-  '</div></div>' +
-
-  // 5. Avance
-  '<div class="section"><div class="sec-title">5. Avance del Proyecto</div><div class="sec-body">' +
-    '<div class="avance-wrap">' +
-      '<div class="av-item"><div class="av-lbl">Avance Físico</div>'+svgBar(af,'#1268C4')+'</div>' +
-      '<div class="av-item"><div class="av-lbl">Avance Financiero</div>'+svgBar(afin,'#0D7A4E')+'</div>' +
-    '</div>' +
-  '</div></div>' +
-
-  // 6. Información Financiera
-  '<div class="section"><div class="sec-title">6. Información Financiera</div><div class="sec-body">' +
-    '<div class="fin-grid" style="margin-bottom:12px;">' +
-      '<div class="fin-box"><div class="fin-lbl">Monto Contrato Inicial</div><div class="fin-val" style="color:#001233;">'+fmtL(mI)+'</div></div>' +
-      (mM>0?'<div class="fin-box"><div class="fin-lbl">Monto Modificado</div><div class="fin-val" style="color:#B8620A;">'+fmtL(mM)+'</div></div>':'') +
-      '<div class="fin-box"><div class="fin-lbl">Monto Vigente</div><div class="fin-val" style="color:#002B6B;">'+fmtL(vigente)+'</div></div>' +
-      '<div class="fin-box"><div class="fin-lbl">Total Devengado</div><div class="fin-val" style="color:#0D7A4E;">'+fmtL(dev)+'</div></div>' +
-      '<div class="fin-box"><div class="fin-lbl">Saldo Pendiente</div><div class="fin-val" style="color:'+(deuda<0?'#C0392B':'#1C2B3A')+';">'+fmtL(deuda)+'</div></div>' +
-    '</div>' +
-    (mods.length ? '<div style="margin-top:8px;"><div style="font-size:8pt;font-weight:700;color:#7B8FA0;margin-bottom:4px;">MODIFICACIONES / ÓRDENES DE CAMBIO</div><table><thead><tr><th>#</th><th>Tipo</th><th>N° Doc.</th><th>Monto</th><th>Plazo</th><th>Fecha</th><th>Descripción</th></tr></thead><tbody>'+modsRows+'</tbody></table></div>' : '') +
-  '</div></div>' +
-
-  // 7. Pagos
-  '<div class="section"><div class="sec-title">7. Pagos y Estimaciones ('+(p.pagos||[]).length+')</div><div class="sec-body">' +
-    ((p.pagos||[]).length ?
-      '<table><thead><tr><th>#</th><th>Monto</th><th>Fecha</th><th>Descripción / Contexto</th></tr></thead><tbody>'+pagosRows+'</tbody></table>' :
-      '<div style="text-align:center;color:#888;padding:8px;">Sin pagos registrados</div>') +
-  '</div></div>' +
-
-  // 8. Garantías
-  '<div class="section"><div class="sec-title">8. Garantías / Fianzas</div><div class="sec-body">' +
-    '<table><thead><tr><th>Tipo</th><th>N° Fianza</th><th>Vigencia</th><th>Monto</th></tr></thead><tbody>'+fianzasRows+'</tbody></table>' +
-  '</div></div>' +
-
-  // 9. Fotos del proyecto
-  (function() {
-    var fotos = p.fotos || [];
-    if (!fotos.length) return '';
-    // Convertir URLs a base64 para que funcionen offline en el HTML
-    // (las URLs de Supabase son públicas, se cargan directamente)
-    var fotosHtml = fotos.map(function(f, fi) {
-      return '<div style="break-inside:avoid;display:flex;flex-direction:column;gap:6px;">' +
-        '<img src="'+f.url+'" style="width:100%;height:180px;object-fit:cover;border-radius:6px;border:1px solid #D0DCE6;" />' +
-        '<div style="font-size:8pt;color:#7B8FA0;text-align:center;">' +
-          (f.fecha ? '<span style="font-family:monospace;">'+f.fecha+'</span> · ' : '') +
-          (f.descripcion || 'Foto '+(fi+1)) +
-        '</div>' +
-      '</div>';
-    }).join('');
-    return '<div class="section"><div class="sec-title">9. Registro Fotográfico ('+fotos.length+' foto'+( fotos.length!==1?'s':'')+') </div>' +
-      '<div class="sec-body" style="padding:14px 16px;">' +
-        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">'+fotosHtml+'</div>' +
-      '</div></div>';
-  })() +
-
-  // Footer
-  '<div class="footer">DGCV — Sistema de Información de Transporte · Ficha generada el '+fecha+'</div>' +
-
-  '</div></body></html>';
-
-  // Abrir en nueva pestaña (permite imprimir como PDF o guardar como HTML editable)
-  var win = window.open('', '_blank');
-  win.document.write(html);
-  win.document.close();
-  win.document.title = 'Ficha — ' + noContr;
-}
-
 
 function closeDetail(e) {
   if (e && e.target !== document.getElementById('detailOverlay')) return;
@@ -1804,7 +1317,6 @@ function _legacyModFromField(p) {
 //  FORMULARIO — ABRIR
 // ═══════════════════════════════════════════════════════════
 function openForm(u, idx) {
-  window._currentFormUnidad = u;
   var proj = (idx !== null && idx !== undefined) ? (DB[u] || [])[idx] : null;
   var perms = getPerms(u, proj);
   var isNew = (idx === null || idx === undefined);
@@ -1853,15 +1365,6 @@ function openForm(u, idx) {
     var selSup = document.getElementById('f_contratoSupervisionId');
     if (selSup && p.contratoSupervisionId) {
       selSup.value = p.contratoSupervisionId;
-      // Populate the search text input if using the new search UI
-      var supBuscar = document.getElementById('f_supBuscar');
-      if (supBuscar) {
-        var supObj = contratosSupervision.find(function(s){ return s._sid === p.contratoSupervisionId; });
-        if (supObj) {
-          var unidLbl = UNIDADES[supObj._unidad] ? UNIDADES[supObj._unidad].nombre.split(' ').slice(0,2).join(' ') : supObj._unidad;
-          supBuscar.value = (supObj.supervisora||'?')+' — '+(supObj.noContratoSup||'S/N')+' ('+unidLbl+')';
-        }
-      }
       onSelectContratoSupervision(selSup);
     }
   }
@@ -2039,38 +1542,6 @@ function syncMontoModificacion() {
   hidden.value = m > 0 ? String(m) : '';
 }
 
-// ── Pagos / Estimaciones ─────────────────────────────────────
-function addPago(data) {
-  data = data || {};
-  pagoCount++;
-  var n   = pagoCount;
-  var con = document.getElementById('pagos-container');
-  if (!con) return;
-  var div = document.createElement('div');
-  div.className = 'pago-card'; div.id = 'pago-' + n;
-  div.innerHTML =
-    '<div class="pago-num">Pago / Estimación N° ' + n + '</div>' +
-    '<button class="pago-remove" title="Eliminar pago" onclick="document.getElementById(\'pago-' + n + '\').remove();recalcPagos()">✕</button>' +
-    '<div class="form-grid g2" style="margin-bottom:8px">' +
-      '<div class="form-group"><label>Monto del Pago (L)</label>' +
-        '<input type="number" class="pago-monto" value="' + (data.monto || '') + '" step="0.01" min="0" placeholder="0.00" ' +
-        'oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
-      '<div class="form-group"><label>Fecha de Ingreso</label>' +
-        '<input type="date" class="pago-fechaIngreso" value="' + (data.fechaIngreso || data.fecha || '') + '"/></div>' +
-    '</div>' +
-    '<div class="form-grid g3">' +
-      '<div class="form-group"><label>Período — Fecha Inicio</label>' +
-        '<input type="date" class="pago-periodoIni" value="' + (data.periodoIni || '') + '"/></div>' +
-      '<div class="form-group"><label>Período — Fecha Fin</label>' +
-        '<input type="date" class="pago-periodoFin" value="' + (data.periodoFin || '') + '"/></div>' +
-      '<div class="form-group"><label>Contexto / Descripción</label>' +
-        '<input type="text" class="pago-ctx" value="' + (data.contexto || '') + '" placeholder="Ej. Anticipo, Estimación 1…"/></div>' +
-    '</div>';
-  con.appendChild(div);
-  recalcPagos();
-}
-
-
 function recalcPagos() {
   var mI  = parseFloat((document.getElementById('f_montoContratoInicial')||{}).value) || 0;
   var mM  = getUltimoMontoMod();
@@ -2171,7 +1642,8 @@ function saveProject() {
     if (!g('f_supervisora'))      errs.push('Empresa Supervisora');
     if (!g('f_noContratoSup'))    errs.push('N° Contrato de Supervisión');
     if (!g('f_fechaAdjudicacion'))errs.push('Fecha de Adjudicación');
-    // Avance físico se calcula automáticamente desde registros de avance
+    var avF = parseFloat(g('f_avanceFisico'));
+    if (g('f_avanceFisico')===''||isNaN(avF)||avF<0||avF>100) errs.push('Avance de Ejecución (0–100%)');
     if (errs.length) { showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err'); return; }
 
     var cambiosSup = [];
@@ -2213,7 +1685,7 @@ function saveProject() {
       montoModificacion:    mM > 0 ? String(mM) : '',
       modificaciones:       modificaciones,
       plazo:                plazoFinal,
-      avanceFisico:         g('f_avanceFisico') || '0',
+      avanceFisico:         g('f_avanceFisico'),
       avanceFinanciero:     String(avFin),
       pagos:                pagos,
       totalDevengado:       dev.toFixed(2),
@@ -2253,12 +1725,13 @@ function saveProject() {
     if (tipoSup === 'interna' && !g('f_supervisorCampo')) errs.push('Nombre del Supervisor de Campo');
     if (tipoSup === 'externa' && contratosSupervision.length > 0 && !g('f_contratoSupervisionId')) errs.push('Contrato de Supervisión Externa');
     if (!g('f_fechaAdjudicacion')) errs.push('Fecha de Adjudicación');
-    // Avance físico se calcula automáticamente desde registros de avance
+    var avF = parseFloat(g('f_avanceFisico'));
+    if (g('f_avanceFisico')===''||isNaN(avF)||avF<0||avF>100) errs.push('Avance Físico (0–100%)');
     if (errs.length) {
       showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err');
       ['f_nProceso','f_estado','f_proyecto','f_descripcion','f_longitud',
        'f_departamento','f_municipio','f_aldeaBarrio','f_latitud','f_longitudRef',
-       'f_constructora','f_coordinador','f_fechaAdjudicacion'
+       'f_constructora','f_coordinador','f_fechaAdjudicacion','f_avanceFisico'
       ].forEach(function(id) {
         var el = document.getElementById(id); if (!el) return;
         var empty = id==='f_avanceFisico' ? (el.value===''||isNaN(parseFloat(el.value))) : !el.value;
@@ -2320,7 +1793,7 @@ function saveProject() {
       montoModificacion:    mM > 0 ? String(mM) : '',
       modificaciones:       modificaciones,
       plazo:                plazoFinal,
-      avanceFisico:         g('f_avanceFisico') || '0',
+      avanceFisico:         g('f_avanceFisico'),
       avanceFinanciero:     String(avFin),
       pagos:                pagos,
       totalDevengado:       dev.toFixed(2),
@@ -2388,21 +1861,12 @@ function deleteProject(u, i) {
 //  MODALES — CERRAR
 // ═══════════════════════════════════════════════════════════
 function closeModal(e) {
-  // Solo cerrar si e es undefined (llamada programática o X) — nunca por click en overlay
-  if (e && e.target) return;
+  if (e && e.target !== document.getElementById('modalOverlay')) return;
   document.getElementById('modalOverlay').classList.remove('open');
   editingId = null; endosoCount = 0; pagoCount = 0; modCount = 0;
-  // Restaurar siempre el botón guardar a su estado original
-  var btnG = document.querySelector('.modal-footer .btn-primary');
-  if (btnG) {
-    btnG.disabled = false;
-    btnG.onclick  = saveProject;
-    btnG.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 7l3 3 7-6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Guardar';
-  }
 }
 function closeDetail(e) {
-  // Solo cerrar si e es undefined (llamada programática o X) — nunca por click en overlay
-  if (e && e.target) return;
+  if (e && e.target !== document.getElementById('detailOverlay')) return;
   document.getElementById('detailOverlay').classList.remove('open');
 }
 
@@ -2538,17 +2002,11 @@ async function guardarUsuario(id) {
     if (pass !== pass2)   { showToast('Las contraseñas no coinciden.', 'err'); return; }
 
     try {
-      // 1. Crear cuenta en Supabase Auth
-      // Llamar Edge Function crear-usuario (usa service_role internamente)
-      var siteUrl = window.location.origin + window.location.pathname;
-      var fnUrl   = SUPA_PROJECT + '/functions/v1/crear-usuario';
+      // Llamar Edge Function crear-usuario (usa service_role)
+      var fnUrl = SUPA_PROJECT + '/functions/v1/crear-usuario';
       var signupResp = await fetch(fnUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': 'Bearer ' + currentToken,
-          'apikey':        SUPA_KEY
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentToken, 'apikey': SUPA_KEY },
         body: JSON.stringify({ email: email, password: pass, nombre: nombre, unidad: unidad, rol: rol })
       });
       var signupData = await signupResp.json();
@@ -2556,8 +2014,7 @@ async function guardarUsuario(id) {
         showToast('Error: ' + (signupData.error || 'No se pudo crear el usuario.'), 'err');
         return;
       }
-
-      showToast(signupData.message || 'Usuario creado. Correo de verificación enviado a ' + email + '.', 'ok');
+      showToast(signupData.message || 'Usuario ' + email + ' creado correctamente.', 'ok');
       closeModal();
       document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
       renderUsuariosPanel();
@@ -2611,17 +2068,11 @@ async function guardarCambioPass(userId) {
   var pass2 = (document.getElementById('cp_pass2') || {}).value || '';
   if (pass1.length < 8) { showToast('La contraseña debe tener al menos 8 caracteres.', 'err'); return; }
   if (pass1 !== pass2)  { showToast('Las contraseñas no coinciden.', 'err'); return; }
-
-  // Llamar Edge Function para cambiar contraseña con service_role
   var fnUrl = SUPA_PROJECT + '/functions/v1/cambiar-password';
   try {
     var resp = await fetch(fnUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': 'Bearer ' + currentToken,
-        'apikey':        SUPA_KEY
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentToken, 'apikey': SUPA_KEY },
       body: JSON.stringify({ userId: userId, password: pass1 })
     });
     var data = await resp.json().catch(function(){ return {}; });
@@ -2903,263 +2354,6 @@ function generarReporte() {
   abrirOpcionesReporte();
 }
 
-// ═══════════════════════════════════════════════════════════
-//  EXPORTAR EXCEL — SheetJS
-// ═══════════════════════════════════════════════════════════
-function abrirExportarExcel() {
-  // Reutilizar el mismo modal de opciones que el reporte HTML
-  // pero con botón "Exportar Excel"
-  var unidadOpts = Object.entries(UNIDADES).map(function(e) {
-    var k = e[0]; var u = e[1];
-    var count = (DB[k]||[]).length;
-    return '<label class="reporte-unidad-item" id="eu-'+k+'">' +
-      '<input type="checkbox" class="eu-check" value="'+k+'" checked ' +
-        'onchange="_toggleUnidadExcel(this)" style="accent-color:var(--az2)"/>' +
-      '<span style="flex:1">'+u.nombre+'</span>' +
-      '<span style="font-size:10px;font-family:var(--mono);color:var(--gris3)">'+count+'</span>' +
-    '</label>';
-  }).join('');
-
-  document.getElementById('modalTitle').textContent = 'Exportar a Excel';
-  document.getElementById('modalBody').innerHTML =
-    '<div class="reporte-section-lbl">Cobertura</div>' +
-    '<div class="reporte-selector">' +
-      '<div class="reporte-opt selected" id="eopt-global" onclick="_selExcelOpt(&quot;global&quot;)">' +
-        '<div class="reporte-opt-icon"><svg viewBox="0 0 24 24" fill="none" width="26" height="26"><circle cx="12" cy="12" r="10" stroke="#0D7A4E" stroke-width="1.8"/><path d="M12 2C12 2 8 7 8 12s4 10 4 10M12 2c0 0 4 5 4 10s-4 10-4 10M2 12h20" stroke="#0D7A4E" stroke-width="1.6" stroke-linecap="round"/></svg></div>' +
-        '<div class="reporte-opt-title">Global</div>' +
-        '<div class="reporte-opt-desc">Todas las unidades</div>' +
-      '</div>' +
-      '<div class="reporte-opt" id="eopt-unidad" onclick="_selExcelOpt(&quot;unidad&quot;)">' +
-        '<div class="reporte-opt-icon"><svg viewBox="0 0 24 24" fill="none" width="26" height="26"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="#0D7A4E" stroke-width="1.8"/></svg></div>' +
-        '<div class="reporte-opt-title">Por Unidad</div>' +
-        '<div class="reporte-opt-desc">Seleccione unidades</div>' +
-      '</div>' +
-    '</div>' +
-
-    '<div id="excel-unidades" style="display:none;margin-bottom:14px;">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-        '<span style="font-size:11px;color:var(--gris3)">Unidades a exportar:</span>' +
-        '<button onclick="_toggleTodasExcel()" style="font-size:10px;color:var(--az2);background:none;border:none;cursor:pointer;font-family:var(--font);">Seleccionar todas</button>' +
-      '</div>' +
-      '<div class="reporte-unidad-grid">'+unidadOpts+'</div>' +
-    '</div>' +
-
-    '<div class="reporte-section-lbl">Filtrar por año</div>' +
-    '<div class="reporte-chips" id="excel-anio-chips">' +
-      (function() {
-        var y = new Date().getFullYear();
-        var s = '<button class="reporte-chip selected" data-eanio="todos" onclick="_selExcelAnio(this)">Todos los años</button>';
-        s += '<button class="reporte-chip" data-eanio="'+y+'" onclick="_selExcelAnio(this)">'+y+'</button>';
-        for (var i = y-1; i >= 2024; i--)
-          s += '<button class="reporte-chip" data-eanio="'+i+'" onclick="_selExcelAnio(this)">'+i+'</button>';
-        return s;
-      })() +
-    '</div>';
-
-  var btnGuardar = document.querySelector('.modal-footer .btn-primary');
-  if (btnGuardar) {
-    btnGuardar.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="white" stroke-width="1.3"/><path d="M3.5 4.5L5 7l-1.5 2.5M7 9.5h3M7 7h3M7 4.5h3" stroke="white" stroke-width="1.2" stroke-linecap="round"/></svg> Exportar Excel';
-    btnGuardar.onclick = _ejecutarExportExcel;
-    btnGuardar.style.display = '';
-  }
-  document.getElementById('modalOverlay').classList.add('open');
-}
-
-function _selExcelOpt(tipo) {
-  document.getElementById('eopt-global').classList.toggle('selected', tipo === 'global');
-  document.getElementById('eopt-unidad').classList.toggle('selected', tipo === 'unidad');
-  document.getElementById('excel-unidades').style.display = tipo === 'unidad' ? 'block' : 'none';
-}
-
-function _selExcelAnio(btn) {
-  document.querySelectorAll('[data-eanio]').forEach(function(b) { b.classList.remove('selected'); });
-  btn.classList.add('selected');
-}
-
-function _toggleUnidadExcel(chk) {
-  var item = chk.closest('.reporte-unidad-item');
-  if (item) item.classList.toggle('selected', chk.checked);
-}
-
-function _toggleTodasExcel() {
-  var checks = document.querySelectorAll('.eu-check');
-  var allChecked = Array.from(checks).every(function(c) { return c.checked; });
-  checks.forEach(function(c) {
-    c.checked = !allChecked;
-    var item = c.closest('.reporte-unidad-item');
-    if (item) item.classList.toggle('selected', !allChecked);
-  });
-}
-
-function _ejecutarExportExcel() {
-  var esGlobal = document.getElementById('eopt-global').classList.contains('selected');
-  var anioBtn  = document.querySelector('[data-eanio].selected');
-  var anioSel  = anioBtn ? anioBtn.getAttribute('data-eanio') : 'todos';
-
-  var unidades = esGlobal
-    ? Object.keys(UNIDADES)
-    : Array.from(document.querySelectorAll('.eu-check:checked')).map(function(c) { return c.value; });
-
-  if (!unidades.length) { showToast('Seleccione al menos una unidad.', 'err'); return; }
-  closeModal();
-
-  // Recuperar botón de guardar original
-  setTimeout(function() {
-    var btnGuardar = document.querySelector('.modal-footer .btn-primary');
-    if (btnGuardar) btnGuardar.onclick = saveProject;
-  }, 100);
-
-  // Cargar SheetJS si no está disponible
-  if (typeof XLSX === 'undefined') {
-    showToast('Cargando librería Excel...', 'ok');
-    var script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-    script.onload  = function() { _generarExcel(unidades, anioSel, esGlobal); };
-    script.onerror = function() { showToast('No se pudo cargar la librería Excel.', 'err'); };
-    document.head.appendChild(script);
-  } else {
-    _generarExcel(unidades, anioSel, esGlobal);
-  }
-}
-
-function _generarExcel(unidades, anioSel, esGlobal) {
-  showToast('Generando Excel...', 'ok');
-
-  // Función para inferir año
-  function getAnio(p) {
-    if (p.anioProyecto) return String(p.anioProyecto);
-    var m = (p.nProceso || p.noContrato || p.noContratoSup || '').match(/(\d{4})$/);
-    return m ? m[1] : '';
-  }
-
-  // Filtrar proyectos
-  var todos = [];
-  unidades.forEach(function(k) {
-    (DB[k] || []).forEach(function(p) {
-      if (anioSel !== 'todos' && getAnio(p) !== anioSel) return;
-      todos.push({ p: p, unidad: k });
-    });
-  });
-
-  if (!todos.length) { showToast('No hay proyectos con esos filtros.', 'err'); return; }
-
-  function fmtN(n) { var v = parseFloat(n); return isNaN(v) ? 0 : v; }
-  function fmtS(v) { return v || ''; }
-  var fecha = new Date().toLocaleDateString('es-HN');
-
-  // ── HOJA 1: Básica ──────────────────────────────────────────
-  var basicHeaders = [
-    'N° Proceso','N° Contrato','Año','Tipo','Proyecto',
-    'Departamento','Municipio','Estado','Empresa',
-    'Coordinador','Av. Físico (%)','Av. Financiero (%)',
-    'Monto Contrato (L)','Monto Modificado (L)','Monto Vigente (L)',
-    'Total Devengado (L)','Deuda Pendiente (L)','Unidad'
-  ];
-
-  var basicRows = todos.map(function(item) {
-    var p = item.p;
-    var esSup = p.tipoProyecto === 'supervision';
-    var nc    = esSup ? fmtS(p.noContratoSup) : fmtS(p.noContrato);
-    var emp   = esSup ? fmtS(p.supervisora)   : fmtS(p.constructora);
-    var mI    = fmtN(p.montoContratoInicial);
-    var mM    = fmtN(p.montoModificacion);
-    var vig   = mM > 0 ? mM : mI;
-    return [
-      fmtS(p.nProceso), nc, getAnio(p),
-      esSup ? 'Supervisión' : 'Construcción',
-      fmtS(p.proyecto),
-      fmtS(p.departamento), fmtS(p.municipio),
-      fmtS(p.estado), emp, fmtS(p.coordinador),
-      fmtN(p.avanceFisico), fmtN(p.avanceFinanciero),
-      mI, mM, vig,
-      fmtN(p.totalDevengado), fmtN(p.deuda),
-      UNIDADES[item.unidad] ? UNIDADES[item.unidad].nombre : item.unidad
-    ];
-  });
-
-  // ── HOJA 2: Detalle completo ───────────────────────────────
-  var detHeaders = [
-    'N° Proceso','N° Contrato','Año','Tipo','Proyecto','Descripción',
-    'Departamento','Municipio','Aldea/Barrio','Latitud','Longitud GPS',
-    'Longitud (km)','Estado','Empresa','Coordinador','Supervisor Campo',
-    'Tipo Supervisión','Fecha Adjudicación','Fecha Contrato','Fecha Inicio',
-    'Fecha Fin Programada','Plazo (días)',
-    'Monto Inicial (L)','Monto Modificado (L)','Monto Vigente (L)',
-    'Total Devengado (L)','Deuda (L)',
-    'Av. Físico (%)','Av. Financiero (%)',
-    'N° Fianza Anticipo','Ini. Fianza Anticipo','Fin Fianza Anticipo','Monto Fianza Anticipo (L)',
-    'N° Fianza Cumplimiento','Ini. Fianza Cumplimiento','Fin Fianza Cumplimiento','Monto Fianza Cumplimiento (L)',
-    'N° Fianza Calidad','Ini. Fianza Calidad','Fin Fianza Calidad','Monto Fianza Calidad (L)',
-    'Cant. Pagos','Pagos Detalle',
-    'Contratos Supervisados','Unidad'
-  ];
-
-  var detRows = todos.map(function(item) {
-    var p = item.p;
-    var esSup = p.tipoProyecto === 'supervision';
-    var nc    = esSup ? fmtS(p.noContratoSup) : fmtS(p.noContrato);
-    var emp   = esSup ? fmtS(p.supervisora)   : fmtS(p.constructora);
-    var mI    = fmtN(p.montoContratoInicial);
-    var mM    = fmtN(p.montoModificacion);
-    var vig   = mM > 0 ? mM : mI;
-    var pagos = (p.pagos || []);
-    var pagosDetalle = pagos.map(function(pg, pi) {
-      return (pi+1)+'. L '+fmtN(pg.monto).toLocaleString('es-HN')+(pg.contexto?' ('+pg.contexto+')':'');
-    }).join(' | ');
-    return [
-      fmtS(p.nProceso), nc, getAnio(p),
-      esSup ? 'Supervisión' : 'Construcción',
-      fmtS(p.proyecto), fmtS(p.descripcion),
-      fmtS(p.departamento), fmtS(p.municipio), fmtS(p.aldeaBarrio),
-      fmtS(p.latitud), fmtS(p.longitudRef), fmtS(p.longitud),
-      fmtS(p.estado), emp, fmtS(p.coordinador), fmtS(p.supervisorCampo),
-      fmtS(p.tipoSupervision),
-      fmtS(p.fechaAdjudicacion), fmtS(p.fechaContrato),
-      fmtS(p.fechaInicio), fmtS(p.fechaFinObra), fmtS(p.plazo),
-      mI, mM, vig,
-      fmtN(p.totalDevengado), fmtN(p.deuda),
-      fmtN(p.avanceFisico), fmtN(p.avanceFinanciero),
-      fmtS(p.nFianzaAnticipo), fmtS(p.iniFA), fmtS(p.finFA), fmtN(p.montoFianzaAnticipo),
-      fmtS(p.nFianzaCumplimiento), fmtS(p.iniFC), fmtS(p.finFC), fmtN(p.montoFianzaCumplimiento),
-      fmtS(p.nFianzaCalidad), fmtS(p.iniFCal), fmtS(p.finFCal), fmtN(p.montoFianzaCalidad),
-      pagos.length, pagosDetalle,
-      fmtS(p.contratosSupervisa),
-      UNIDADES[item.unidad] ? UNIDADES[item.unidad].nombre : item.unidad
-    ];
-  });
-
-  // ── Construir libro Excel ──────────────────────────────────
-  var wb = XLSX.utils.book_new();
-
-  // Hoja básica
-  var ws1 = XLSX.utils.aoa_to_sheet([basicHeaders].concat(basicRows));
-  // Estilo de ancho de columnas aproximado
-  ws1['!cols'] = [
-    {wch:20},{wch:20},{wch:6},{wch:12},{wch:55},
-    {wch:18},{wch:15},{wch:22},{wch:40},
-    {wch:22},{wch:12},{wch:15},
-    {wch:18},{wch:18},{wch:18},
-    {wch:18},{wch:18},{wch:30}
-  ];
-  XLSX.utils.book_append_sheet(wb, ws1, 'Resumen');
-
-  // Hoja detalle
-  var ws2 = XLSX.utils.aoa_to_sheet([detHeaders].concat(detRows));
-  ws2['!cols'] = Array(detHeaders.length).fill({wch:18});
-  ws2['!cols'][4] = {wch:55}; // Proyecto
-  ws2['!cols'][5] = {wch:60}; // Descripción
-  XLSX.utils.book_append_sheet(wb, ws2, 'Detalle Completo');
-
-  // ── Nombre del archivo ─────────────────────────────────────
-  var scope   = esGlobal ? 'Global' : unidades.map(function(k){return k.toUpperCase();}).join('-');
-  var anioTag = anioSel === 'todos' ? 'TodosLosAnios' : anioSel;
-  var nombre  = 'SIT-DGCV_'+scope+'_'+anioTag+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
-
-  XLSX.writeFile(wb, nombre);
-  showToast('Excel descargado: '+nombre, 'ok');
-}
-
-
 function abrirOpcionesReporte() {
   // Construir lista de unidades para selección
   var unidadOpts = Object.entries(UNIDADES).map(function(e) {
@@ -3204,15 +2398,27 @@ function abrirOpcionesReporte() {
     '<div class="reporte-chips" id="reporte-anio-chips">' +
       (function(){
         var y = new Date().getFullYear();
-        var s = '<button class="reporte-chip selected" data-anio="todos" onclick="_selAnio(this)">Todos los años</button>';
-        s += '<button class="reporte-chip" data-anio="'+y+'" onclick="_selAnio(this)">'+y+'</button>';
+        var s = '<button class="reporte-chip selected" data-anio="'+y+'" onclick="_selAnio(this)">'+y+' (actual)</button>';
         for(var i=y-1; i>=2024; i--)
           s += '<button class="reporte-chip" data-anio="'+i+'" onclick="_selAnio(this)">'+i+'</button>';
         return s;
       })() +
     '</div>' +
 
-    '';
+    // ── Tipo de análisis
+    '<div class="reporte-section-lbl" style="margin-top:14px;">Tipo de análisis</div>' +
+    '<div class="reporte-chips">' +
+      '<button class="reporte-chip selected" data-analisis="estado" onclick="_selAnalisis(this)">Estado actual</button>' +
+      '<button class="reporte-chip" data-analisis="proyeccion" onclick="_selAnalisis(this)">Proyección trimestral</button>' +
+    '</div>' +
+
+    // ── Info proyección
+    '<div id="reporte-proyeccion-info" style="display:none;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:10px 12px;margin-top:12px;font-size:11px;color:var(--az2);line-height:1.6;">' +
+      '<strong>Proyección trimestral:</strong> El sistema detecta automáticamente el trimestre actual ' +
+      'y proyecta el avance físico y financiero esperado al cierre del <strong>siguiente trimestre</strong>. ' +
+      'Basada en la tasa de avance diaria de cada proyecto activo del año seleccionado. ' +
+      'Identifica proyectos en riesgo de no completarse en plazo.' +
+    '</div>';
 
   // Cambiar botón de guardar
   var btnGuardar = document.querySelector('.modal-footer .btn-primary');
@@ -3266,7 +2472,8 @@ function _ejecutarReporte() {
   var esGlobal  = document.getElementById('ropt-global').classList.contains('selected');
   var anioBtn   = document.querySelector('[data-anio].selected');
   var anioReporte = anioBtn ? parseInt(anioBtn.getAttribute('data-anio')) : new Date().getFullYear();
-  var analisis  = 'estado'; // Solo estado actual
+  var analBtn   = document.querySelector('[data-analisis].selected');
+  var analisis  = analBtn ? analBtn.getAttribute('data-analisis') : 'estado';
 
   // Unidades seleccionadas
   var unidades = esGlobal
@@ -3282,22 +2489,24 @@ function _ejecutarReporte() {
     if (btnGuardar) btnGuardar.onclick = saveProject;
   }, 100);
 
-  _generarReporteEstado(unidades, anioReporte, esGlobal);
+  if (analisis === 'proyeccion') {
+    _generarReporteProyeccion(unidades, anioReporte);
+  } else {
+    _generarReporteEstado(unidades, anioReporte, esGlobal);
+  }
 }
 
 // ── REPORTE DE ESTADO ACTUAL ─────────────────────────────────────────────────
 function _generarReporteEstado(unidades, anioReporte, esGlobal) {
   var fecha   = new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
   var titulo  = esGlobal ? 'Reporte General de Avance — DGCV' : 'Reporte por Unidad — DGCV';
+  var subtitulo = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · Año: ' + anioReporte;
   var anioActual = new Date().getFullYear();
-  var anioLabel  = String(anioReporte) === 'todos' ? 'Todos los años' : (anioReporte === anioActual ? String(anioReporte) + ' (Año Actual)' : String(anioReporte));
-  var subtitulo  = (esGlobal ? 'Todas las unidades' : unidades.map(function(k){ return UNIDADES[k]?UNIDADES[k].nombre:k; }).join(', ')) + ' · ' + anioLabel;
-  var badgeLabel = anioLabel;
+  var badgeLabel = anioReporte === anioActual ? String(anioReporte) + ' (Año Actual)' : String(anioReporte);
 
   // Filtrar proyectos por año: usa campo anioProyecto si existe,
   // sino infiere del nProceso o fechaInicio
   function filtroAnio(p) {
-    if (String(anioReporte) === 'todos') return true;
     // 1. Campo explícito anioProyecto — tiene prioridad absoluta
     if (p.anioProyecto) {
       return String(p.anioProyecto) === String(anioReporte);
@@ -3640,17 +2849,34 @@ function _generarReporteProyeccion(unidades, anioReporte) {
 }
 
 function _abrirVentanaReporte(html, nombre) {
-  // Abrir HTML en nueva pestaña — sin conversión, sin errores tipográficos
-  // Desde la pestaña el usuario puede imprimir o guardar como PDF con Ctrl+P
-  var win = window.open('', '_blank');
-  if (!win) {
-    showToast('Permita las ventanas emergentes para generar el reporte.', 'err');
-    return;
+  showToast('Generando reporte...', 'ok');
+  var nombreArchivo = nombre + '.pdf';
+
+  function ejecutar() {
+    var contenedor = document.createElement('div');
+    contenedor.innerHTML = html;
+    contenedor.style.cssText = 'position:absolute;left:-9999px;top:0;';
+    document.body.appendChild(contenedor);
+    var opt = {
+      margin: [8,8,8,8],
+      filename: nombreArchivo,
+      image: { type:'jpeg', quality:0.97 },
+      html2canvas: { scale:2, useCORS:true, logging:false },
+      jsPDF: { unit:'mm', format:'a4', orientation:'landscape' },
+      pagebreak: { mode:['avoid-all','css','legacy'] }
+    };
+    html2pdf().set(opt).from(contenedor.querySelector('.page')||contenedor).save()
+      .then(function(){ document.body.removeChild(contenedor); showToast('[OK] PDF descargado: '+nombreArchivo, 'ok'); })
+      .catch(function(e){ document.body.removeChild(contenedor); showToast('Error al generar PDF: '+e.message,'err'); });
   }
-  win.document.write(html);
-  win.document.close();
-  win.document.title = nombre;
-  showToast('Reporte generado. Use Ctrl+P para imprimir o guardar como PDF.', 'ok');
+
+  if (typeof html2pdf === 'undefined') {
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    script.onload = ejecutar;
+    script.onerror = function(){ showToast('No se pudo cargar la librería PDF.','err'); };
+    document.head.appendChild(script);
+  } else { ejecutar(); }
 }
 
 function generarReporte_OLD() {
@@ -3703,8 +2929,8 @@ function renderMapaPanel() {
         (sinCoords > 0 ? ' · <span style="color:var(--gris3)">' + sinCoords + ' sin coordenadas</span>' : '') +
       '</p>' +
     '</div>' +
-    // Controles — fila 1: unidad, tipo, estado, año
-    '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">' +
+    // Controles
+    '<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">' +
       '<select class="filter-select" id="mapa-filtro-unidad" onchange="actualizarMapa()" style="font-size:12px;">' +
         '<option value="">Todas las unidades</option>' +
         Object.entries(UNIDADES).map(function(e){ return '<option value="'+e[0]+'">'+e[1].nombre+'</option>'; }).join('') +
@@ -3718,19 +2944,7 @@ function renderMapaPanel() {
         '<option value="">Todos los estados</option>' +
         ESTADOS.map(function(e){ return '<option>'+e+'</option>'; }).join('') +
       '</select>' +
-      '<select class="filter-select" id="mapa-filtro-anio" onchange="actualizarMapa()" style="font-size:12px;">' +
-        '<option value="">Todos los años</option>' +
-        (function(){ var y=new Date().getFullYear(); var s=''; for(var i=y;i>=2024;i--) s+='<option value="'+i+'">'+i+'</option>'; return s; })() +
-      '</select>' +
-    '</div>' +
-    // Controles — fila 2: búsqueda por contrato
-    '<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">' +
-      '<div class="search-box" style="flex:1;max-width:360px;">' +
-        '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="var(--gris3)" stroke-width="1.2"/><path d="M8 8l2.5 2.5" stroke="var(--gris3)" stroke-width="1.2" stroke-linecap="round"/></svg>' +
-        '<input type="text" id="mapa-buscar-contrato" placeholder="Buscar por N° contrato, proceso o empresa..." oninput="actualizarMapa()" style="font-size:12px;"/>' +
-      '</div>' +
-      '<button onclick="_limpiarFiltrosMapa()" style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--gris6);color:var(--gris2);cursor:pointer;font-family:var(--font);">Limpiar filtros</button>' +
-      '<span id="mapa-contador" style="font-size:11px;color:var(--gris3);"></span>' +
+      '<span id="mapa-contador" style="font-size:11px;color:var(--gris3);margin-left:4px;"></span>' +
     '</div>' +
     // Leyenda
     '<div style="display:flex;gap:14px;margin-bottom:10px;flex-wrap:wrap;">' +
@@ -3853,18 +3067,9 @@ function _renderMarcadores(filtrados) {
 }
 
 function actualizarMapa() {
-  var filtroUnidad  = (document.getElementById('mapa-filtro-unidad')  || {}).value || '';
-  var filtroTipo    = (document.getElementById('mapa-filtro-tipo')    || {}).value || '';
-  var filtroEstado  = (document.getElementById('mapa-filtro-estado')  || {}).value || '';
-  var filtroAnio    = (document.getElementById('mapa-filtro-anio')    || {}).value || '';
-  var busqueda      = ((document.getElementById('mapa-buscar-contrato') || {}).value || '').trim().toLowerCase();
-
-  // Función para inferir año del proyecto
-  function getAnio(p) {
-    if (p.anioProyecto) return String(p.anioProyecto);
-    var m = (p.nProceso || p.noContrato || p.noContratoSup || '').match(/(\d{4})$/);
-    return m ? m[1] : '';
-  }
+  var filtroUnidad = (document.getElementById('mapa-filtro-unidad') || {}).value || '';
+  var filtroTipo   = (document.getElementById('mapa-filtro-tipo')   || {}).value || '';
+  var filtroEstado = (document.getElementById('mapa-filtro-estado') || {}).value || '';
 
   var allP = [];
   Object.keys(DB).forEach(function(unidad) {
@@ -3873,33 +3078,11 @@ function actualizarMapa() {
       if (!p.latitud || !p.longitudRef) return;
       if (filtroTipo   && (p.tipoProyecto||'construccion') !== filtroTipo)   return;
       if (filtroEstado && p.estado !== filtroEstado) return;
-      if (filtroAnio   && getAnio(p) !== filtroAnio) return;
-
-      // Búsqueda por contrato, proceso o empresa
-      if (busqueda) {
-        var esSup = p.tipoProyecto === 'supervision';
-        var nc    = (esSup ? (p.noContratoSup||'') : (p.noContrato||'')).toLowerCase();
-        var emp   = (esSup ? (p.supervisora||'')   : (p.constructora||'')).toLowerCase();
-        var np    = (p.nProceso||'').toLowerCase();
-        var proy  = (p.proyecto||'').toLowerCase();
-        if (!nc.includes(busqueda) && !np.includes(busqueda) && !emp.includes(busqueda) && !proy.includes(busqueda)) return;
-      }
-
       allP.push({ p: p, unidad: unidad });
     });
   });
 
   _renderMarcadores(allP);
-}
-
-function _limpiarFiltrosMapa() {
-  ['mapa-filtro-unidad','mapa-filtro-tipo','mapa-filtro-estado','mapa-filtro-anio'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) el.value = '';
-  });
-  var buscar = document.getElementById('mapa-buscar-contrato');
-  if (buscar) buscar.value = '';
-  actualizarMapa();
 }
 
 function navegarDesdeMapaAProyecto(unidadKey, proyIdx) {
