@@ -354,11 +354,11 @@ function onSelectContratoSupervision(sel) {
 // ═══════════════════════════════════════════════════════════
 function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
   var tipoSup = p.tipoSupervision || 'externa';
-  var haySupContratos = contratosSupervision.length > 0;
+  var supDeLaUnidad = contratosSupervision.filter(function(s){ return s._unidad === u; });
+  var haySupContratos = supDeLaUnidad.length > 0;
   var supOpts = '<option value="">— Seleccione contrato de supervisión —</option>';
-  contratosSupervision.forEach(function(s) {
-    var unidLbl = UNIDADES[s._unidad] ? UNIDADES[s._unidad].nombre.split(' ').slice(0,2).join(' ') : s._unidad;
-    var lbl = (s.supervisora || '?') + ' — ' + (s.noContratoSup || 'S/N') + ' (' + unidLbl + ')';
+  supDeLaUnidad.forEach(function(s) {
+    var lbl = (s.supervisora || '?') + ' — ' + (s.noContratoSup || 'S/N');
     supOpts += '<option value="'+(s._sid||'')+'"'+(p.contratoSupervisionId===s._sid?' selected':'')+'>'+lbl+'</option>';
   });
 
@@ -720,6 +720,8 @@ async function doLogin() {
     if (navEmpresas)        navEmpresas.style.display        = currentUser.esGlobalAdmin ? 'flex' : 'none';
     var reportBtn = document.getElementById('reportBtn');
     if (reportBtn) reportBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
+    var excelBtn = document.getElementById('excelBtn');
+    if (excelBtn) excelBtn.style.display = currentUser.esAdmin ? 'flex' : 'none';
 
     if (!currentUser.esAdmin && !currentUser.esGlobalViewer) {
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
@@ -798,6 +800,36 @@ var UNIT_NAV_LOGOS = {
   fbcie: '<svg class=\"nav-icon\" viewBox=\"0 0 16 16\" fill=\"none\"><path d=\"M1 11 C1 11 4 4 8 4 S15 11 15 11\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\" fill=\"none\"/><line x1=\"1\" y1=\"11\" x2=\"15\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linecap=\"round\"/><line x1=\"4.5\" y1=\"7.5\" x2=\"4.5\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"8\" y1=\"5\" x2=\"8\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"11.5\" y1=\"7.5\" x2=\"11.5\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><line x1=\"1\" y1=\"13\" x2=\"15\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-dasharray=\"2 1.5\"/></svg>',
   ldv: '<svg class=\"nav-icon\" viewBox=\"0 0 16 16\" fill=\"none\"><rect x=\"1\" y=\"8\" width=\"7\" height=\"4\" rx=\".8\" stroke=\"currentColor\" stroke-width=\"1.2\"/><circle cx=\"2.5\" cy=\"12.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><circle cx=\"6.5\" cy=\"12.5\" r=\"1.2\" stroke=\"currentColor\" stroke-width=\"1.1\"/><rect x=\"4\" y=\"5.5\" width=\"3\" height=\"2.5\" rx=\".4\" stroke=\"currentColor\" stroke-width=\"1.1\"/><path d=\"M7 6.5L9.5 5L11 7L9 9\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9 9L9 11.5\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><path d=\"M13 3C13 3 12 5 12 7S13 9 13 9S14 7 14 5S13 3 13 3Z\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/><path d=\"M15 5C15 5 14 6.5 14 8\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\"/></svg>'
 };
+
+function generarReporteProyecto(u, idx) {
+  var p=DB[u]&&DB[u][idx]; if(!p) return;
+  var esSup=p.tipoProyecto==='supervision';
+  var nc=esSup?(p.noContratoSup||'—'):(p.noContrato||'—');
+  var empresa=esSup?(p.supervisora||'—'):(p.constructora||'—');
+  var fecha=new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
+  var mI=parseFloat(p.montoContratoInicial)||0; var mM=parseFloat(p.montoModificacion)||0; var vig=mM>0?mM:mI;
+  var af=parseFloat(p.avanceFisico)||0; var afin=parseFloat(p.avanceFinanciero)||0;
+  function fL(n){ var v=parseFloat(n); return isNaN(v)?'—':'L '+v.toLocaleString('es-HN',{minimumFractionDigits:2}); }
+  function svgBar(pct,color){ return '<svg width="100%" height="14" viewBox="0 0 300 14"><rect width="300" height="14" rx="7" fill="#e8ecf0"/><rect width="'+Math.min(Math.max(pct,0),100)*3+'" height="14" rx="7" fill="'+color+'"/><text x="150" y="10" text-anchor="middle" font-size="9" fill="white" font-family="Arial" font-weight="bold">'+pct.toFixed(1)+'%</text></svg>'; }
+  var estColor={'En Ejecución':'#0D7A4E','En Proceso / Contratación':'#1268C4','Suspendido':'#B8620A','Terminado':'#7B8FA0'}[p.estado]||'#333';
+  var pagosRows=(p.pagos||[]).map(function(pg,i){ return '<tr><td>'+(i+1)+'</td><td>'+fL(pg.monto)+'</td><td>'+(pg.fechaIngreso||'—')+'</td><td>'+(pg.contexto||'—')+'</td></tr>'; }).join('');
+  var fotosHtml=(p.fotos||[]).map(function(f,fi){ return '<div style="break-inside:avoid"><img src="'+f.url+'" style="width:100%;height:160px;object-fit:cover;border-radius:6px;border:1px solid #D0DCE6;"/><div style="font-size:8pt;color:#7B8FA0;text-align:center;margin-top:4px;">'+(f.descripcion||'Foto '+(fi+1))+'</div></div>'; }).join('');
+  var html='<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><title>Ficha — '+nc+'</title>'+
+  '<style>body{font-family:Arial,sans-serif;color:#1C2B3A;font-size:11pt;margin:0;}.page{max-width:750px;margin:0 auto;padding:24px 32px;}.hdr{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:0;border-bottom:4px solid #D4A820;display:flex;}.hl{padding:18px 22px;flex:1;}.hr{padding:18px 22px;text-align:right;min-width:150px;}.inst{font-size:8pt;opacity:.7;margin-bottom:1px;}.sec-t{font-size:9pt;font-weight:700;color:#002B6B;padding:6px 12px;background:#EDF5FC;border-left:4px solid #D4A820;margin:16px 0 0;}.sec-b{border:1px solid #D0DCE6;border-top:none;padding:12px 16px;}.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}.lbl{font-size:8pt;color:#7B8FA0;font-weight:600;text-transform:uppercase;margin-bottom:2px;}.val{font-size:10pt;color:#1C2B3A;font-weight:500;}.fin-box{text-align:center;background:#f8f9fb;border-radius:6px;padding:10px 8px;border:1px solid #e0e8f0;}.fin-lbl{font-size:8pt;color:#7B8FA0;margin-bottom:3px;}.fin-val{font-size:11pt;font-weight:700;font-family:monospace;}table{width:100%;border-collapse:collapse;font-size:9pt;}th{background:#f0f4f8;padding:6px 10px;text-align:left;font-size:8pt;color:#7B8FA0;font-weight:700;border-bottom:2px solid #D0DCE6;}td{padding:6px 10px;border-bottom:1px solid #f0f0f0;}.footer{text-align:center;font-size:8pt;color:#aaa;margin-top:20px;padding-top:10px;border-top:1px solid #eee;}@media print{body{margin:0;}@page{margin:12mm 10mm;size:A4;}}</style></head><body><div class="page">'+
+  '<div class="hdr"><div class="hl"><div class="inst">República de Honduras · Secretaría de Infraestructura y Transporte</div><div class="inst">Dirección General de Conservación Vial — DGCV</div><div style="font-size:15pt;font-weight:700;margin:3px 0 2px;">Ficha de Proyecto</div><div style="display:inline-block;background:rgba(212,168,32,.3);color:#F0C040;font-size:8pt;font-weight:700;padding:2px 10px;border-radius:10px;">'+(esSup?'SUPERVISIÓN':'CONSTRUCCIÓN')+'</div></div><div class="hr"><div style="font-size:8pt;opacity:.7;">Generado el</div><div style="font-size:9pt;font-weight:600;">'+fecha+'</div><div style="font-size:12pt;font-weight:700;font-family:monospace;margin-top:6px;">'+nc+'</div></div></div>'+
+  '<div class="sec-t">1. Identificación</div><div class="sec-b"><div style="font-size:11pt;font-weight:600;color:#1C2B3A;margin-bottom:10px;">'+p.proyecto+'</div><div class="g3"><div><div class="lbl">N° Proceso</div><div class="val" style="font-family:monospace;">'+(p.nProceso||'—')+'</div></div><div><div class="lbl">Estado</div><div><span style="background:'+estColor+'22;color:'+estColor+';padding:2px 10px;border-radius:10px;font-size:9pt;font-weight:700;">'+(p.estado||'—')+'</span></div></div><div><div class="lbl">Año</div><div class="val">'+(p.anioProyecto||'—')+'</div></div></div></div>'+
+  '<div class="sec-t">2. Ubicación</div><div class="sec-b"><div class="g3"><div><div class="lbl">Departamento</div><div class="val">'+(p.departamento||'—')+'</div></div><div><div class="lbl">Municipio</div><div class="val">'+(p.municipio||'—')+'</div></div><div><div class="lbl">Longitud</div><div class="val">'+(p.longitud?p.longitud+' km':'—')+'</div></div></div></div>'+
+  '<div class="sec-t">3. Empresa y Personal</div><div class="sec-b"><div class="g2"><div><div class="lbl">'+(esSup?'Supervisora':'Constructora')+'</div><div class="val">'+empresa+'</div></div><div><div class="lbl">Coordinador</div><div class="val">'+(p.coordinador||'—')+'</div></div></div></div>'+
+  '<div class="sec-t">4. Fechas y Plazo</div><div class="sec-b"><div class="g3"><div><div class="lbl">Inicio</div><div class="val">'+(p.fechaInicio||'—')+'</div></div><div><div class="lbl">Plazo</div><div class="val">'+(p.plazo?p.plazo+' días':'—')+'</div></div><div><div class="lbl">Fin programado</div><div class="val">'+(p.fechaFinObra||'—')+'</div></div></div></div>'+
+  '<div class="sec-t">5. Avance</div><div class="sec-b"><div style="margin-bottom:8px;"><div class="lbl" style="margin-bottom:3px;">Avance Físico</div>'+svgBar(af,'#1268C4')+'</div><div><div class="lbl" style="margin-bottom:3px;">Avance Financiero</div>'+svgBar(afin,'#0D7A4E')+'</div></div>'+
+  '<div class="sec-t">6. Financiero</div><div class="sec-b"><div class="g3" style="margin-bottom:10px;"><div class="fin-box"><div class="fin-lbl">Monto Vigente</div><div class="fin-val" style="color:#002B6B;">'+fL(vig)+'</div></div><div class="fin-box"><div class="fin-lbl">Devengado</div><div class="fin-val" style="color:#0D7A4E;">'+fL(p.totalDevengado)+'</div></div><div class="fin-box"><div class="fin-lbl">Deuda</div><div class="fin-val" style="color:'+(parseFloat(p.deuda)<0?'#C0392B':'#1C2B3A')+';">'+fL(p.deuda)+'</div></div></div>'+
+  ((p.pagos||[]).length?'<table><thead><tr><th>#</th><th>Monto</th><th>Fecha</th><th>Descripción</th></tr></thead><tbody>'+pagosRows+'</tbody></table>':'<div style="font-size:11px;color:#aaa;text-align:center;padding:8px;">Sin pagos registrados</div>')+
+  '</div>'+
+  (fotosHtml?'<div class="sec-t">7. Registro Fotográfico ('+(p.fotos||[]).length+')</div><div class="sec-b"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">'+fotosHtml+'</div></div>':'')+
+  '<div class="footer">DGCV · Ficha generada el '+fecha+'</div>'+
+  '</div></body></html>';
+  var win=window.open('','_blank'); win.document.write(html); win.document.close();
+}
 
 // ═══════════════════════════════════════════════════════════
 //  ALERTAS DE VENCIMIENTO DE FIANZAS
@@ -994,6 +1026,65 @@ function renderDashboard() {
 //  Si p es null, evalúa permisos de "nuevo proyecto"
 // ═══════════════════════════════════════════════════════════
 // Coordinador del proyecto O admin puede subir fotos, registrar avances y generar reportes
+function _renderFotosGrid(p) {
+  var fotos=p.fotos||[];
+  if(!fotos.length) return '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:12px 0;">Sin fotos registradas.</div>';
+  return fotos.map(function(f,fi){
+    return '<div class="foto-item"><img src="'+f.url+'" class="foto-thumb" onclick="_verFoto(\''+f.url+'\',\''+encodeURIComponent(f.descripcion||'')+'\')" />'+
+      '<div class="foto-meta"><div class="foto-fecha">'+(f.fecha||'')+'</div><div class="foto-desc">'+(f.descripcion||'')+'</div></div>'+
+      (_puedeOperar(p)?'<button class="foto-del" onclick="eliminarFoto(event,this,\''+f.path+'\',\''+f.url+'\')">✕</button>':'')+
+    '</div>';
+  }).join('');
+}
+function _verFoto(url,desc){
+  var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;cursor:zoom-out;'; ov.onclick=function(){document.body.removeChild(ov);};
+  ov.innerHTML='<img src="'+url+'" style="max-width:90vw;max-height:80vh;border-radius:6px;"/>'+(decodeURIComponent(desc)?'<div style="color:#fff;font-size:13px;background:rgba(0,0,0,.5);padding:6px 14px;border-radius:20px;">'+decodeURIComponent(desc)+'</div>':'');
+  document.body.appendChild(ov);
+}
+async function subirFotos(input,u,idx){
+  var files=Array.from(input.files); if(!files.length) return;
+  var p=DB[u]&&DB[u][idx]; if(!p) return;
+  var noContr=((p.noContrato||p.noContratoSup||p.nProceso||'sin-id').replace(/[^a-zA-Z0-9-]/g,'_'));
+  showToast('Subiendo '+files.length+' foto(s)...','ok');
+  var desc=prompt('Descripción de las fotos (opcional):','')||'';
+  var fechaHoy=new Date().toISOString().slice(0,10);
+  var fotos=p.fotos||[]; var err=0;
+  for(var fi=0;fi<files.length;fi++){
+    var file=files[fi]; var ext=file.name.split('.').pop().toLowerCase();
+    var path=noContr+'/'+Date.now()+'_'+fi+'.'+ext;
+    var blob=file.size>2*1024*1024?await _comprimirImagen(file,1200,0.82):file;
+    try{
+      var resp=await fetch(STORAGE_URL+'/object/'+BUCKET+'/'+path,{method:'POST',headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,'Content-Type':file.type||'image/jpeg','x-upsert':'true'},body:blob});
+      if(resp.ok) fotos.push({url:SUPA_PROJECT+'/storage/v1/object/public/'+BUCKET+'/'+path,path:path,descripcion:desc,fecha:fechaHoy});
+      else err++;
+    }catch(e){err++;}
+  }
+  p.fotos=fotos;
+  await _guardarFotosEnDB(u,idx,fotos);
+  var grid=document.getElementById('fotos-grid-'+u+'-'+idx);
+  if(grid) grid.innerHTML=_renderFotosGrid(p);
+  showToast((fotos.length-(err||0))+' foto(s) subida(s).'+(err?' '+err+' errores.':''),'ok');
+  input.value='';
+}
+async function _guardarFotosEnDB(u,idx,fotos){
+  var p=DB[u][idx]; var sid=p._sid||(p.data&&p.data._sid);
+  if(!sid){ try{ var q=await fetch(SUPA_URL+'/proyectos?unidad=eq.'+u+'&data->>nProceso=eq.'+encodeURIComponent(p.nProceso)+'&select=id',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken}}); var rows=await q.json(); if(rows&&rows.length) sid=rows[0].id; }catch(e){return false;} }
+  if(!sid) return false;
+  try{ var newData=Object.assign({},p,{fotos:fotos}); var resp=await fetch(SUPA_URL+'/proyectos?id=eq.'+sid,{method:'PATCH',headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({data:newData})}); if(resp.ok) DB[u][idx]=newData; return resp.ok; }catch(e){return false;}
+}
+async function eliminarFoto(event,btn,path,url){
+  event.stopPropagation();
+  if(!confirm('¿Eliminar esta foto?')) return;
+  var grid=btn.closest('[id^="fotos-grid-"]'); if(!grid) return;
+  var parts=grid.id.replace('fotos-grid-','').split('-'); var idx=parseInt(parts[parts.length-1]); var u=parts.slice(0,parts.length-1).join('-');
+  var p=DB[u]&&DB[u][idx]; if(!p) return;
+  try{ await fetch(STORAGE_URL+'/object/'+BUCKET+'/'+path,{method:'DELETE',headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken}}); }catch(e){}
+  p.fotos=(p.fotos||[]).filter(function(f){return f.url!==url;});
+  await _guardarFotosEnDB(u,idx,p.fotos);
+  grid.innerHTML=_renderFotosGrid(p);
+  showToast('Foto eliminada.','ok');
+}
+
 function _puedeOperar(p) {
   if (!currentUser || !p) return false;
   if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
@@ -1286,6 +1377,10 @@ function openDetail(u, i) {
     '</div>' +
     '<div class="dp-section"><div class="dp-section-title">Pagos ('+(p.pagos||[]).length+')</div>' + pagosHtml + '</div>' +
     '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>';
+
+    (_puedeOperar(p) ?
+      '<div style="padding:14px 0 4px;"><button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="width:100%;padding:10px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);">Ficha del Proyecto</button></div>'
+    : '') ;
 
   document.getElementById('detailOverlay').classList.add('open');
 }
@@ -1791,6 +1886,37 @@ function syncMontoModificacion() {
   hidden.value = m > 0 ? String(m) : '';
 }
 
+function addPago(data) {
+  data = data || {};
+  pagoCount++;
+  var n   = pagoCount;
+  var con = document.getElementById('pagos-container');
+  if (!con) return;
+  var div = document.createElement('div');
+  div.className = 'pago-card'; div.id = 'pago-' + n;
+  div.innerHTML =
+    '<div class="pago-num">Pago / Estimación N° ' + n + '</div>' +
+    '<button class="pago-remove" title="Eliminar" onclick="document.getElementById(\'pago-' + n + '\').remove();recalcPagos()">✕</button>' +
+    '<div class="form-grid g2" style="margin-bottom:8px;">' +
+      '<div class="form-group"><label>Monto del Pago (L)</label>' +
+        '<input type="number" class="pago-monto" value="' + (data.monto||'') + '" step="0.01" min="0" placeholder="0.00" ' +
+        'oninput="this.value=this.value.replace(/[^0-9.]/g,\'\');recalcPagos()"/></div>' +
+      '<div class="form-group"><label>Fecha de Ingreso</label>' +
+        '<input type="date" class="pago-fechaIngreso" value="' + (data.fechaIngreso||data.fecha||'') + '"/></div>' +
+    '</div>' +
+    '<div class="form-grid g3">' +
+      '<div class="form-group"><label>Período — Fecha Inicio</label>' +
+        '<input type="date" class="pago-periodoIni" value="' + (data.periodoIni||'') + '"/></div>' +
+      '<div class="form-group"><label>Período — Fecha Fin</label>' +
+        '<input type="date" class="pago-periodoFin" value="' + (data.periodoFin||'') + '"/></div>' +
+      '<div class="form-group"><label>Contexto / Descripción</label>' +
+        '<input type="text" class="pago-ctx" value="' + (data.contexto||'') + '" placeholder="Ej. Anticipo, Estimación 1…"/></div>' +
+    '</div>';
+  con.appendChild(div);
+  recalcPagos();
+}
+
+
 function recalcPagos() {
   var mI  = parseFloat((document.getElementById('f_montoContratoInicial')||{}).value) || 0;
   var mM  = getUltimoMontoMod();
@@ -2249,17 +2375,19 @@ async function guardarUsuario(id) {
     if (pass !== pass2)   { showToast('Las contraseñas no coinciden.', 'err'); return; }
 
     try {
-      // Crear usuario via Edge Function (service_role, activo de inmediato)
-      var signupResp = await fetch(SUPA_PROJECT + '/functions/v1/crear-usuario', {
+      // Crear usuario directamente con Supabase Auth
+      var signupResp = await fetch(SUPA_AUTH + '/signup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentToken, 'apikey': SUPA_KEY },
-        body: JSON.stringify({ email: email, password: pass, nombre: nombre, unidad: unidad, rol: rol })
+        headers: { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: pass })
       });
       var signupData = await signupResp.json();
-      if (!signupResp.ok || signupData.error) {
-        showToast('Error: ' + (signupData.error || 'No se pudo crear el usuario.'), 'err');
-        return;
+      if (!signupResp.ok) {
+        var msg = signupData.msg || signupData.error_description || signupData.message || 'Error desconocido';
+        showToast('Error: ' + msg, 'err'); return;
       }
+      // Crear perfil en tabla usuarios
+      await supaPost('usuarios', { id: genUUID(), email: email, nombre: nombre, unidad: unidad, rol: rol, activo: true });
       showToast('Usuario ' + email + ' creado correctamente.', 'ok');
       closeModal();
       document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
@@ -2589,6 +2717,66 @@ function generarReporte() {
   abrirOpcionesReporte();
 }
 
+// ═══════════════════════════════════════════════════════════
+//  EXPORTAR EXCEL — SheetJS
+// ═══════════════════════════════════════════════════════════
+function abrirExportarExcel() {
+  var unidadOpts = Object.entries(UNIDADES).map(function(e) {
+    var k=e[0]; var u=e[1]; var count=(DB[k]||[]).length;
+    return '<label class="reporte-unidad-item" id="eu-'+k+'"><input type="checkbox" class="eu-check" value="'+k+'" checked onchange="_toggleUnidadExcel(this)" style="accent-color:var(--az2)"/><span style="flex:1">'+u.nombre+'</span><span style="font-size:10px;font-family:var(--mono);color:var(--gris3)">'+count+'</span></label>';
+  }).join('');
+  document.getElementById('modalTitle').textContent = 'Exportar a Excel';
+  document.getElementById('modalBody').innerHTML =
+    '<div class="reporte-selector">' +
+      '<div class="reporte-opt selected" id="eopt-global" onclick="_selExcelOpt(&quot;global&quot;)"><div class="reporte-opt-title">Global</div><div class="reporte-opt-desc">Todas las unidades</div></div>' +
+      '<div class="reporte-opt" id="eopt-unidad" onclick="_selExcelOpt(&quot;unidad&quot;)"><div class="reporte-opt-title">Por Unidad</div><div class="reporte-opt-desc">Seleccione unidades</div></div>' +
+    '</div>' +
+    '<div id="excel-unidades" style="display:none;margin:12px 0;"><div class="reporte-unidad-grid">'+unidadOpts+'</div></div>' +
+    '<div class="reporte-section-lbl" style="margin-top:12px;">Año</div>' +
+    '<div class="reporte-chips" id="excel-anio-chips">' +
+      (function(){ var y=new Date().getFullYear(); var s='<button class="reporte-chip selected" data-eanio="todos" onclick="_selExcelAnio(this)">Todos los años</button>'; s+='<button class="reporte-chip" data-eanio="'+y+'" onclick="_selExcelAnio(this)">'+y+'</button>'; for(var i=y-1;i>=2024;i--) s+='<button class="reporte-chip" data-eanio="'+i+'" onclick="_selExcelAnio(this)">'+i+'</button>'; return s; })() +
+    '</div>';
+  var btn=document.querySelector('.modal-footer .btn-primary');
+  if(btn){ btn.innerHTML='Exportar Excel'; btn.onclick=_ejecutarExportExcel; btn.style.display=''; }
+  document.getElementById('modalOverlay').classList.add('open');
+}
+function _selExcelOpt(t){ document.getElementById('eopt-global').classList.toggle('selected',t==='global'); document.getElementById('eopt-unidad').classList.toggle('selected',t==='unidad'); document.getElementById('excel-unidades').style.display=t==='unidad'?'block':'none'; }
+function _selExcelAnio(btn){ document.querySelectorAll('[data-eanio]').forEach(function(b){b.classList.remove('selected');}); btn.classList.add('selected'); }
+function _toggleUnidadExcel(chk){ var item=chk.closest('.reporte-unidad-item'); if(item) item.classList.toggle('selected',chk.checked); }
+function _ejecutarExportExcel(){
+  var esGlobal=document.getElementById('eopt-global').classList.contains('selected');
+  var anioBtn=document.querySelector('[data-eanio].selected');
+  var anioSel=anioBtn?anioBtn.getAttribute('data-eanio'):'todos';
+  var unidades=esGlobal?Object.keys(UNIDADES):Array.from(document.querySelectorAll('.eu-check:checked')).map(function(c){return c.value;});
+  if(!unidades.length){showToast('Seleccione al menos una unidad.','err');return;}
+  closeModal();
+  if(typeof XLSX==='undefined'){
+    var sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload=function(){_generarExcel(unidades,anioSel,esGlobal);}; document.head.appendChild(sc);
+  } else { _generarExcel(unidades,anioSel,esGlobal); }
+}
+function _generarExcel(unidades,anioSel,esGlobal){
+  showToast('Generando Excel...','ok');
+  function getAnio(p){ if(p.anioProyecto) return String(p.anioProyecto); var m=(p.nProceso||p.noContrato||'').match(/(\d{4})$/); return m?m[1]:''; }
+  function fN(n){ var v=parseFloat(n); return isNaN(v)?0:v; } function fS(v){ return v||''; }
+  var todos=[];
+  unidades.forEach(function(k){ (DB[k]||[]).forEach(function(p){ if(anioSel!=='todos'&&getAnio(p)!==anioSel) return; todos.push({p:p,unidad:k}); }); });
+  if(!todos.length){showToast('No hay proyectos con esos filtros.','err');return;}
+  var h1=['N° Proceso','N° Contrato','Año','Tipo','Proyecto','Departamento','Municipio','Estado','Empresa','Coordinador','Av. Físico (%)','Av. Financiero (%)','Monto Vigente (L)','Total Devengado (L)','Deuda (L)','Unidad'];
+  var r1=todos.map(function(item){ var p=item.p; var esSup=p.tipoProyecto==='supervision'; var nc=esSup?(p.noContratoSup||'—'):(p.noContrato||'—'); var emp=esSup?(p.supervisora||'—'):(p.constructora||'—'); var mI=fN(p.montoContratoInicial); var mM=fN(p.montoModificacion); var vig=mM>0?mM:mI; return [fS(p.nProceso),nc,getAnio(p),esSup?'Supervisión':'Construcción',fS(p.proyecto),fS(p.departamento),fS(p.municipio),fS(p.estado),emp,fS(p.coordinador),fN(p.avanceFisico),fN(p.avanceFinanciero),vig,fN(p.totalDevengado),fN(p.deuda),UNIDADES[item.unidad]?UNIDADES[item.unidad].nombre:item.unidad]; });
+  var h2=h1.concat(['Descripción','Longitud km','Fecha Inicio','Fecha Fin','Plazo días','Monto Inicial','Monto Modificado','Pagos']);
+  var r2=todos.map(function(item){ var p=item.p; var esSup=p.tipoProyecto==='supervision'; var nc=esSup?(p.noContratoSup||'—'):(p.noContrato||'—'); var emp=esSup?(p.supervisora||'—'):(p.constructora||'—'); var mI=fN(p.montoContratoInicial); var mM=fN(p.montoModificacion); var vig=mM>0?mM:mI; var pagosStr=(p.pagos||[]).map(function(pg,i){return (i+1)+'. L '+fN(pg.monto).toLocaleString('es-HN')+(pg.contexto?' ('+pg.contexto+')':'');}).join(' | '); return [fS(p.nProceso),nc,getAnio(p),esSup?'Supervisión':'Construcción',fS(p.proyecto),fS(p.departamento),fS(p.municipio),fS(p.estado),emp,fS(p.coordinador),fN(p.avanceFisico),fN(p.avanceFinanciero),vig,fN(p.totalDevengado),fN(p.deuda),UNIDADES[item.unidad]?UNIDADES[item.unidad].nombre:item.unidad,fS(p.descripcion),fS(p.longitud),fS(p.fechaInicio),fS(p.fechaFinObra),fS(p.plazo),mI,mM,pagosStr]; });
+  var wb=XLSX.utils.book_new();
+  var ws1=XLSX.utils.aoa_to_sheet([h1].concat(r1)); ws1['!cols']=h1.map(function(_,i){return {wch:i===4?55:20};});
+  var ws2=XLSX.utils.aoa_to_sheet([h2].concat(r2)); ws2['!cols']=h2.map(function(_,i){return {wch:i===4||i===16?55:20};});
+  XLSX.utils.book_append_sheet(wb,ws1,'Resumen');
+  XLSX.utils.book_append_sheet(wb,ws2,'Detalle Completo');
+  var scope=esGlobal?'Global':unidades.map(function(k){return k.toUpperCase();}).join('-');
+  var anioTag=anioSel==='todos'?'TodosLosAnios':anioSel;
+  XLSX.writeFile(wb,'SIT-DGCV_'+scope+'_'+anioTag+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  showToast('Excel descargado.','ok');
+}
+
 function abrirOpcionesReporte() {
   // Construir lista de unidades para selección
   var unidadOpts = Object.entries(UNIDADES).map(function(e) {
@@ -2633,27 +2821,15 @@ function abrirOpcionesReporte() {
     '<div class="reporte-chips" id="reporte-anio-chips">' +
       (function(){
         var y = new Date().getFullYear();
-        var s = '<button class="reporte-chip selected" data-anio="'+y+'" onclick="_selAnio(this)">'+y+' (actual)</button>';
+        var s = '<button class="reporte-chip selected" data-anio="todos" onclick="_selAnio(this)">Todos los años</button>';
+        s += '<button class="reporte-chip" data-anio="'+y+'" onclick="_selAnio(this)">'+y+'</button>';
         for(var i=y-1; i>=2024; i--)
           s += '<button class="reporte-chip" data-anio="'+i+'" onclick="_selAnio(this)">'+i+'</button>';
         return s;
       })() +
     '</div>' +
 
-    // ── Tipo de análisis
-    '<div class="reporte-section-lbl" style="margin-top:14px;">Tipo de análisis</div>' +
-    '<div class="reporte-chips">' +
-      '<button class="reporte-chip selected" data-analisis="estado" onclick="_selAnalisis(this)">Estado actual</button>' +
-      '<button class="reporte-chip" data-analisis="proyeccion" onclick="_selAnalisis(this)">Proyección trimestral</button>' +
-    '</div>' +
-
-    // ── Info proyección
-    '<div id="reporte-proyeccion-info" style="display:none;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:10px 12px;margin-top:12px;font-size:11px;color:var(--az2);line-height:1.6;">' +
-      '<strong>Proyección trimestral:</strong> El sistema detecta automáticamente el trimestre actual ' +
-      'y proyecta el avance físico y financiero esperado al cierre del <strong>siguiente trimestre</strong>. ' +
-      'Basada en la tasa de avance diaria de cada proyecto activo del año seleccionado. ' +
-      'Identifica proyectos en riesgo de no completarse en plazo.' +
-    '</div>';
+    '';
 
   // Cambiar botón de guardar
   var btnGuardar = document.querySelector('.modal-footer .btn-primary');
@@ -2707,8 +2883,7 @@ function _ejecutarReporte() {
   var esGlobal  = document.getElementById('ropt-global').classList.contains('selected');
   var anioBtn   = document.querySelector('[data-anio].selected');
   var anioReporte = anioBtn ? parseInt(anioBtn.getAttribute('data-anio')) : new Date().getFullYear();
-  var analBtn   = document.querySelector('[data-analisis].selected');
-  var analisis  = analBtn ? analBtn.getAttribute('data-analisis') : 'estado';
+  var analisis = 'estado';
 
   // Unidades seleccionadas
   var unidades = esGlobal
@@ -2724,11 +2899,7 @@ function _ejecutarReporte() {
     if (btnGuardar) btnGuardar.onclick = saveProject;
   }, 100);
 
-  if (analisis === 'proyeccion') {
-    _generarReporteProyeccion(unidades, anioReporte);
-  } else {
-    _generarReporteEstado(unidades, anioReporte, esGlobal);
-  }
+  _generarReporteEstado(unidades, anioReporte, esGlobal);
 }
 
 // ── REPORTE DE ESTADO ACTUAL ─────────────────────────────────────────────────
@@ -2742,6 +2913,7 @@ function _generarReporteEstado(unidades, anioReporte, esGlobal) {
   // Filtrar proyectos por año: usa campo anioProyecto si existe,
   // sino infiere del nProceso o fechaInicio
   function filtroAnio(p) {
+    if (String(anioReporte) === 'todos') return true;
     // 1. Campo explícito anioProyecto — tiene prioridad absoluta
     if (p.anioProyecto) {
       return String(p.anioProyecto) === String(anioReporte);
