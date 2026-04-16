@@ -396,7 +396,9 @@ function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
     '<div class="form-grid g2">' +
       '<div class="form-group"><label>Empresa Constructora <span class="req">*</span></label>'+empresaInput('f_constructora','constructora',fv('constructora'))+'</div>' +
       '<div class="form-group"><label>N° de Contrato</label><input type="text" id="f_noContrato" value="'+fv('noContrato')+'"/></div>' +
-      '<div class="form-group"><label>Nombre del Coordinador <span class="req">*</span></label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>' +
+      (currentUser && currentUser.esAdmin ?
+        '<div class="form-group"><label>Coordinador <span class="req">*</span></label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'"/></div>'
+       : '<input type="hidden" id="f_coordinador" value="'+(fv('coordinador')||'')+'" />') +
     '</div>' +
   '</div>' +
   '<div class="form-section">' +
@@ -524,7 +526,9 @@ function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
     '<div class="form-grid g2">' +
       '<div class="form-group"><label>Empresa Supervisora <span class="req">*</span></label>'+empresaInput('f_supervisora','supervisora',fv('supervisora'))+'</div>' +
       '<div class="form-group"><label>N° de Contrato de Supervisión <span class="req">*</span></label><input type="text" id="f_noContratoSup" value="'+fv('noContratoSup')+'" placeholder="Ej. CS-DGCV-2025-001"/></div>' +
-      '<div class="form-group"><label>Coordinador de Supervisión</label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'" placeholder="Nombre del coordinador de la empresa supervisora"/></div>' +
+      (currentUser && currentUser.esAdmin ?
+        '<div class="form-group"><label>Coordinador de Supervisión</label><input type="text" id="f_coordinador" value="'+fv('coordinador')+'" placeholder="Nombre del coordinador de la empresa supervisora"/></div>'
+       : '<input type="hidden" id="f_coordinador" value="'+(fv('coordinador')||'')+'" />') +
     '</div>' +
     '<div class="form-group" style="margin-top:6px"><label>Contratos de Construcción que Supervisa</label>' +
       '<textarea id="f_contratosSupervisa" rows="2" placeholder="Liste los N° de contratos de construcción que cubre esta supervisión. Ej: CONSTR-001, CONSTR-002">'+fv('contratosSupervisa')+'</textarea>' +
@@ -1750,10 +1754,10 @@ function openForm(u, idx) {
   }
 
   document.getElementById('modalOverlay').classList.add('open');
-  // Si es proyecto nuevo y el usuario es coordinador, auto-completar su nombre en Coordinador
-  if (idx === null && currentUser && currentUser.esUnidadCoord) {
+  // Coordinador = usuario actual siempre (nuevo o edición si es coordinador)
+  if (currentUser && currentUser.esUnidadCoord) {
     var coordInp = document.getElementById('f_coordinador');
-    if (coordInp && !coordInp.value) coordInp.value = currentUser.nombre || '';
+    if (coordInp) coordInp.value = currentUser.nombre || '';
   }
   setTimeout(syncEstadoAvance, 0);
   (p.modificaciones || _legacyModFromField(p)).forEach(function(m) { addModificacion(m); });
@@ -2136,7 +2140,7 @@ function saveProject() {
     if (!g('f_latitud'))           errs.push('Latitud GPS');
     if (!g('f_longitudRef'))       errs.push('Longitud GPS');
     if (!g('f_constructora'))      errs.push('Empresa Constructora');
-    if (!g('f_coordinador'))       errs.push('Nombre del Coordinador');
+    // Coordinador se asigna automáticamente al usuario que registra
     if (tipoSup === 'interna' && !g('f_supervisorCampo')) errs.push('Nombre del Supervisor de Campo');
     if (tipoSup === 'externa' && contratosSupervision.length > 0 && !g('f_contratoSupervisionId')) errs.push('Contrato de Supervisión Externa');
     if (!g('f_fechaAdjudicacion')) errs.push('Fecha de Adjudicación');
@@ -2145,7 +2149,7 @@ function saveProject() {
       showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err');
       ['f_nProceso','f_estado','f_proyecto','f_descripcion','f_longitud',
        'f_departamento','f_municipio','f_aldeaBarrio','f_latitud','f_longitudRef',
-       'f_constructora','f_coordinador','f_fechaAdjudicacion','f_avanceFisico'
+       'f_constructora','f_fechaAdjudicacion','f_avanceFisico'
       ].forEach(function(id) {
         var el = document.getElementById(id); if (!el) return;
         var empty = id==='f_avanceFisico' ? (el.value===''||isNaN(parseFloat(el.value))) : !el.value;
