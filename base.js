@@ -1084,22 +1084,6 @@ async function eliminarFoto(event,btn,path,url,u,idx){
   showToast('Foto eliminada.','ok');
 }
 
-function _puedeOperar(p) {
-  if (!currentUser || !p) return false;
-  if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
-  function norm(s){ return (s||'').toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' '); }
-  var nombre = norm(currentUser.nombre);
-  var email  = norm(currentUser.email);
-  var coord  = norm(p.coordinador);
-  if (!coord) return false;
-  if (coord.includes(nombre) || nombre.includes(coord)) return true;
-  if (email && coord.includes(email)) return true;
-  var partsN = nombre.split(' ').filter(function(t){ return t.length>2; });
-  var partsC = coord.split(' ').filter(function(t){ return t.length>2; });
-  return partsN.some(function(t){ return partsC.includes(t); });
-}
-
-
 function getPerms(unidadKey, p) {
   var cu = currentUser;
   if (!cu) return { canAdd:false, canEdit:false, canDelete:false };
@@ -1438,17 +1422,22 @@ var BUCKET      = 'fotos-proyectos';
 
 function _puedeOperar(p) {
   if (!currentUser || !p) return false;
+  // Admins siempre pueden
   if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
+  // Coordinador de unidad: puede operar proyectos de su misma unidad
+  if (currentUser.esUnidadCoord && p._unidad && p._unidad === currentUser.unidad) return true;
+  // Matching por nombre/email con el campo coordinador del proyecto
   function norm(s){ return (s||'').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' '); }
   var nombre = norm(currentUser.nombre);
   var email  = norm(currentUser.email);
   var coord  = norm(p.coordinador);
   if (!coord) return false;
   if (coord.includes(nombre) || nombre.includes(coord)) return true;
-  if (email && coord.includes(email)) return true;
-  var pN = nombre.split(' ').filter(function(t){ return t.length>2; });
-  var pC = coord.split(' ').filter(function(t){ return t.length>2; });
-  return pN.some(function(t){ return pC.includes(t); });
+  if (email && (coord.includes(email) || email.includes(coord))) return true;
+  // Coincidencia parcial por tokens (nombre puede estar abreviado)
+  var pN = nombre.split(' ').filter(function(t){ return t.length > 2; });
+  var pC = coord.split(' ').filter(function(t){ return t.length > 2; });
+  return pN.length > 0 && pN.some(function(t){ return pC.includes(t); });
 }
 
 function _renderAvancesLista(p, u, idx) {
