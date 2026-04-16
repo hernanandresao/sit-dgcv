@@ -1424,9 +1424,7 @@ function _puedeOperar(p) {
   if (!currentUser || !p) return false;
   // Admins siempre pueden
   if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
-  // Coordinador de unidad: puede operar proyectos de su misma unidad
-  if (currentUser.esUnidadCoord && p._unidad && p._unidad === currentUser.unidad) return true;
-  // Matching por nombre/email con el campo coordinador del proyecto
+  // Solo el coordinador asignado al proyecto puede operar (matching por nombre/email)
   function norm(s){ return (s||'').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' '); }
   var nombre = norm(currentUser.nombre);
   var email  = norm(currentUser.email);
@@ -1465,7 +1463,7 @@ function _renderAvancesLista(p, u, idx) {
           (km>0?'<span style="font-size:10px;font-weight:600;color:var(--verde);background:var(--verde-l);padding:2px 8px;border-radius:8px;">'+km.toFixed(2)+' km</span>':'') +
           (kmAcum>0?'<span style="font-size:9px;color:var(--gris3);">acum: '+kmAcum.toFixed(2)+' km</span>':'') +
           (_puedeOperar(p)?'<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>':'') +
-          (currentUser&&(currentUser.esAdmin||currentUser.esGlobalAdmin)?'<button onclick="eliminarRegistroAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--rojo-l);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--rojo);cursor:pointer;font-family:var(--font);">✕</button>':'') +
+          (_puedeOperar(p)?'<button onclick="eliminarRegistroAvance(\''+u+'\','+idx+','+rIdx+')" title="Eliminar avance" style="background:none;border:1px solid var(--rojo-l);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--rojo);cursor:pointer;font-family:var(--font);">✕ Borrar</button>':'') +
         '</div>' +
       '</div>' +
       (r.observaciones?'<div class="avance-registro-obs">'+r.observaciones+'</div>':'') +
