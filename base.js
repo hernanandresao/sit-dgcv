@@ -1,3 +1,37 @@
+'use strict';
+
+// ═══════════════════════════════════════════════════════════
+//  CONFIGURACIÓN SUPABASE
+// ═══════════════════════════════════════════════════════════
+var SUPA_PROJECT = 'https://furbzmtimdvsterqenff.supabase.co';
+var SUPA_URL     = SUPA_PROJECT + '/rest/v1';
+var SUPA_AUTH    = SUPA_PROJECT + '/auth/v1';
+var SUPA_KEY     = 'sb_publishable_v7rjxV61uvkibEfTDo6gJA_78Rzsocm';
+var currentToken = null;
+var currentUser  = null;
+
+// Helper: GET con autenticación
+async function supaGet(table, query) {
+  var bearer = currentToken ? currentToken : SUPA_KEY;
+  var resp = await fetch(SUPA_URL + '/' + table + '?' + query, {
+    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + bearer }
+  });
+  return resp.json();
+}
+
+// Helper: POST con autenticación
+async function supaPost(table, body) {
+  var bearer = currentToken ? currentToken : SUPA_KEY;
+  return fetch(SUPA_URL + '/' + table, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + bearer,
+      'Content-Type': 'application/json', 'Prefer': 'return=minimal'
+    },
+    body: JSON.stringify(body)
+  });
+}
+
 async function doLogin() {
   var unidad = document.getElementById('loginUnidad').value;
   var email  = (document.getElementById('loginEmail').value || '').trim().toLowerCase();
