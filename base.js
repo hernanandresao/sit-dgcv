@@ -1424,18 +1424,31 @@ function _puedeOperar(p) {
   if (!currentUser || !p) return false;
   // Admins siempre pueden
   if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
-  // Solo el coordinador asignado al proyecto puede operar (matching por nombre/email)
+  // Solo coordinadores de unidad (no admins) siguen con la verificación
+  if (!currentUser.esUnidadCoord) return false;
+
   function norm(s){ return (s||'').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' '); }
   var nombre = norm(currentUser.nombre);
   var email  = norm(currentUser.email);
-  var coord  = norm(p.coordinador);
-  if (!coord) return false;
-  if (coord.includes(nombre) || nombre.includes(coord)) return true;
-  if (email && (coord.includes(email) || email.includes(coord))) return true;
-  // Coincidencia parcial por tokens (nombre puede estar abreviado)
-  var pN = nombre.split(' ').filter(function(t){ return t.length > 2; });
-  var pC = coord.split(' ').filter(function(t){ return t.length > 2; });
-  return pN.length > 0 && pN.some(function(t){ return pC.includes(t); });
+
+  // 1. El usuario creó el proyecto (aparece en historial[0])
+  if (p.historial && p.historial.length > 0) {
+    var creador = norm(p.historial[0].usuario || '');
+    if (creador && (creador === nombre || creador.includes(nombre) || nombre.includes(creador))) return true;
+  }
+
+  // 2. El nombre del usuario coincide con el campo Coordinador del proyecto
+  var coord = norm(p.coordinador);
+  if (coord) {
+    if (coord.includes(nombre) || nombre.includes(coord)) return true;
+    if (email && (coord.includes(email) || email.includes(coord))) return true;
+    // Coincidencia parcial por tokens (ej: "Juan" en "Juan Pérez García")
+    var pN = nombre.split(' ').filter(function(t){ return t.length > 2; });
+    var pC = coord.split(' ').filter(function(t){ return t.length > 2; });
+    if (pN.length > 0 && pN.some(function(t){ return pC.includes(t); })) return true;
+  }
+
+  return false;
 }
 
 function _renderAvancesLista(p, u, idx) {
@@ -1683,6 +1696,7 @@ function _legacyModFromField(p) {
 //  FORMULARIO — ABRIR
 // ═══════════════════════════════════════════════════════════
 function openForm(u, idx) {
+  window._currentFormUnidad = u;
   var proj = (idx !== null && idx !== undefined) ? (DB[u] || [])[idx] : null;
   var perms = getPerms(u, proj);
   var isNew = (idx === null || idx === undefined);
@@ -1736,6 +1750,11 @@ function openForm(u, idx) {
   }
 
   document.getElementById('modalOverlay').classList.add('open');
+  // Si es proyecto nuevo y el usuario es coordinador, auto-completar su nombre en Coordinador
+  if (idx === null && currentUser && currentUser.esUnidadCoord) {
+    var coordInp = document.getElementById('f_coordinador');
+    if (coordInp && !coordInp.value) coordInp.value = currentUser.nombre || '';
+  }
   setTimeout(syncEstadoAvance, 0);
   (p.modificaciones || _legacyModFromField(p)).forEach(function(m) { addModificacion(m); });
   (p.endosos || []).forEach(function(e)  { addEndoso(e); });
