@@ -1026,13 +1026,13 @@ function renderDashboard() {
 //  Si p es null, evalúa permisos de "nuevo proyecto"
 // ═══════════════════════════════════════════════════════════
 // Coordinador del proyecto O admin puede subir fotos, registrar avances y generar reportes
-function _renderFotosGrid(p) {
+function _renderFotosGrid(p, u, i) { u=u||''; i=i||0;
   var fotos=p.fotos||[];
   if(!fotos.length) return '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:12px 0;">Sin fotos registradas.</div>';
   return fotos.map(function(f,fi){
     return '<div class="foto-item"><img src="'+f.url+'" class="foto-thumb" onclick="_verFoto(\''+f.url+'\',\''+encodeURIComponent(f.descripcion||'')+'\')" />'+
       '<div class="foto-meta"><div class="foto-fecha">'+(f.fecha||'')+'</div><div class="foto-desc">'+(f.descripcion||'')+'</div></div>'+
-      (_puedeOperar(p)?'<button class="foto-del" onclick="eliminarFoto(event,this,\''+f.path+'\',\''+f.url+'\')">✕</button>':'')+
+      (_puedeOperar(p)?'<button class="foto-del" title="Eliminar" onclick="eliminarFoto(event,this,\''+f.path+'\',\''+f.url+'\',\''+u+'\','+i+')">✕</button>':'')+
     '</div>';
   }).join('');
 }
@@ -1072,11 +1072,10 @@ async function _guardarFotosEnDB(u,idx,fotos){
   if(!sid) return false;
   try{ var newData=Object.assign({},p,{fotos:fotos}); var resp=await fetch(SUPA_URL+'/proyectos?id=eq.'+sid,{method:'PATCH',headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({data:newData})}); if(resp.ok) DB[u][idx]=newData; return resp.ok; }catch(e){return false;}
 }
-async function eliminarFoto(event,btn,path,url){
+async function eliminarFoto(event,btn,path,url,u,idx){
   event.stopPropagation();
   if(!confirm('¿Eliminar esta foto?')) return;
-  var grid=btn.closest('[id^="fotos-grid-"]'); if(!grid) return;
-  var parts=grid.id.replace('fotos-grid-','').split('-'); var idx=parseInt(parts[parts.length-1]); var u=parts.slice(0,parts.length-1).join('-');
+  var grid=document.getElementById('fotos-grid-'+u+'-'+idx); if(!grid){ var g2=btn.closest('[id^="fotos-grid-"]'); if(g2){var parts=g2.id.replace('fotos-grid-','').split('-');idx=parseInt(parts[parts.length-1]);u=parts.slice(0,parts.length-1).join('-');grid=g2;} } if(!grid) return;
   var p=DB[u]&&DB[u][idx]; if(!p) return;
   try{ await fetch(STORAGE_URL+'/object/'+BUCKET+'/'+path,{method:'DELETE',headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken}}); }catch(e){}
   p.fotos=(p.fotos||[]).filter(function(f){return f.url!==url;});
@@ -1376,10 +1375,35 @@ function openDetail(u, i) {
       '</div>' +
     '</div>' +
     '<div class="dp-section"><div class="dp-section-title">Pagos ('+(p.pagos||[]).length+')</div>' + pagosHtml + '</div>' +
-    '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>';
 
+    // ── Fotos del proyecto
+    '<div class="dp-section" id="dp-fotos-'+u+'-'+i+'">' +
+      '<div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">' +
+        '<span>Fotos del Proyecto ('+(p.fotos||[]).length+')</span>' +
+        (_puedeOperar(p) ? '<label class="foto-upload-btn" for="foto-inp-'+u+'-'+i+'">⬆ Subir foto<input type="file" id="foto-inp-'+u+'-'+i+'" accept="image/*" multiple style="display:none" onchange="subirFotos(this,\''+u+'\','+i+')"/></label>' : '') +
+      '</div>' +
+      '<div id="fotos-grid-'+u+'-'+i+'">'+_renderFotosGrid(p,u,i)+'</div>' +
+    '</div>' +
+
+    // ── Registros de avance
+    '<div class="dp-section" id="dp-avances-'+u+'-'+i+'">' +
+      '<div class="dp-section-title" style="display:flex;align-items:center;justify-content:space-between">' +
+        '<span>Registros de Avance ('+(p.registrosAvance||[]).length+')</span>' +
+        (_puedeOperar(p) ? '<button onclick="abrirRegistroAvance(\''+u+'\','+i+')" style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--verde);background:var(--verde-l);border:1px solid #b7e4cc;padding:4px 12px;border-radius:5px;cursor:pointer;font-family:var(--font);"><svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Registrar Avance</button>' : '') +
+      '</div>' +
+      '<div id="avances-lista-'+u+'-'+i+'">'+_renderAvancesLista(p,u,i)+'</div>' +
+    '</div>' +
+
+    '<div class="dp-section"><div class="dp-section-title" style="display:flex;justify-content:space-between"><span>Historial de Cambios</span><span style="font-size:9px;color:var(--gris3);font-weight:400">Clic para ver detalle</span></div>' + histHtml + '</div>' +
+
+    // ── Ficha y botones de acción
     (_puedeOperar(p) ?
-      '<div style="padding:14px 0 4px;"><button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="width:100%;padding:10px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);">Ficha del Proyecto</button></div>'
+      '<div style="padding:14px 0 4px;display:flex;gap:8px;">' +
+        '<button onclick="generarReporteProyecto(\''+u+'\','+i+')" style="display:flex;align-items:center;justify-content:center;gap:8px;flex:1;padding:11px 16px;border-radius:8px;background:linear-gradient(135deg,#001233,#002B6B);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);">' +
+          '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="2" y="1" width="7" height="11" rx="1" stroke="white" stroke-width="1.2"/><path d="M4 4.5h4M4 6.5h4M4 8.5h2.5" stroke="white" stroke-width="1.1" stroke-linecap="round"/></svg>' +
+          'Ficha del Proyecto' +
+        '</button>' +
+      '</div>'
     : '') ;
 
   document.getElementById('detailOverlay').classList.add('open');
@@ -1636,7 +1660,7 @@ function generarReporteAvance(u,idx,rIdx){
 }
 
 function closeDetail(e) {
-  if (e && e.target !== document.getElementById('detailOverlay')) return;
+  if (e && e.target) return; // Solo cierra con X o llamada directa
   document.getElementById('detailOverlay').classList.remove('open');
 }
 
@@ -2234,7 +2258,7 @@ function deleteProject(u, i) {
 //  MODALES — CERRAR
 // ═══════════════════════════════════════════════════════════
 function closeModal(e) {
-  if (e && e.target !== document.getElementById('modalOverlay')) return;
+  if (e && e.target) return; // Solo cierra con X o llamada directa
   document.getElementById('modalOverlay').classList.remove('open');
   editingId = null; endosoCount = 0; pagoCount = 0; modCount = 0;
 }
@@ -3256,34 +3280,12 @@ function _generarReporteProyeccion(unidades, anioReporte) {
 }
 
 function _abrirVentanaReporte(html, nombre) {
-  showToast('Generando reporte...', 'ok');
-  var nombreArchivo = nombre + '.pdf';
-
-  function ejecutar() {
-    var contenedor = document.createElement('div');
-    contenedor.innerHTML = html;
-    contenedor.style.cssText = 'position:absolute;left:-9999px;top:0;';
-    document.body.appendChild(contenedor);
-    var opt = {
-      margin: [8,8,8,8],
-      filename: nombreArchivo,
-      image: { type:'jpeg', quality:0.97 },
-      html2canvas: { scale:2, useCORS:true, logging:false },
-      jsPDF: { unit:'mm', format:'a4', orientation:'landscape' },
-      pagebreak: { mode:['avoid-all','css','legacy'] }
-    };
-    html2pdf().set(opt).from(contenedor.querySelector('.page')||contenedor).save()
-      .then(function(){ document.body.removeChild(contenedor); showToast('[OK] PDF descargado: '+nombreArchivo, 'ok'); })
-      .catch(function(e){ document.body.removeChild(contenedor); showToast('Error al generar PDF: '+e.message,'err'); });
-  }
-
-  if (typeof html2pdf === 'undefined') {
-    var script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.onload = ejecutar;
-    script.onerror = function(){ showToast('No se pudo cargar la librería PDF.','err'); };
-    document.head.appendChild(script);
-  } else { ejecutar(); }
+  var win = window.open('', '_blank');
+  if (!win) { showToast('Permita ventanas emergentes para generar el reporte.', 'err'); return; }
+  win.document.write(html);
+  win.document.close();
+  win.document.title = nombre;
+  showToast('Reporte generado. Use Ctrl+P para imprimir.', 'ok');
 }
 
 function generarReporte_OLD() {
