@@ -479,12 +479,8 @@ function buildFormConstruccion(u, p, fv, estadoOpts, deptoOpts) {
     '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Modificaciones / Órdenes de Cambio</div>' +
     '<div id="mods-container"></div>' +
     '<button class="add-row-btn" onclick="addModificacion()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Modificación / Orden de Cambio</button>' +
-    '<div class="form-grid g1" style="margin-top:10px">' +
-      '<div class="form-group"><label>Avance Físico de la Obra (%) <span class="req">*</span></label>' +
-        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--az2);width:40px;text-align:right">0%</span></div>' +
-        '<div class="form-hint">El avance financiero se calcula automáticamente desde los pagos</div>' +
-      '</div>' +
-    '</div>' +
+    '<input type="hidden" id="f_avanceFisico" value="'+( fv('avanceFisico')||'0')+'" />' +
+    '<div class="form-hint" style="margin-top:6px;">El avance físico se actualiza automáticamente al registrar avances de KM.</div>' +
     '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
     '<div id="pagos-container"></div>' +
     '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
@@ -587,11 +583,7 @@ function buildFormSupervision(u, p, fv, estadoOpts, deptoOpts) {
     '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Modificaciones / Órdenes de Cambio</div>' +
     '<div id="mods-container"></div>' +
     '<button class="add-row-btn" onclick="addModificacion()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Modificación / Orden de Cambio</button>' +
-    '<div class="form-grid g1" style="margin-top:10px">' +
-      '<div class="form-group"><label>Avance de Ejecución (%) <span class="req">*</span></label>' +
-        '<div style="display:flex;align-items:center;gap:10px"><input type="number" id="f_avanceFisico" value="'+fv('avanceFisico')+'" min="0" max="100" step="0.1" placeholder="0.0" style="width:110px" oninput="clampPct(this);updateAvBar();syncAvanceEstado()"/><div style="flex:1;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="avf-bar" style="height:100%;background:var(--verde);border-radius:4px;transition:.3s;width:0%"></div></div><span id="avf-lbl" style="font-size:12px;font-family:var(--mono);color:var(--verde);width:40px;text-align:right">0%</span></div>' +
-      '</div>' +
-    '</div>' +
+    '<input type="hidden" id="f_avanceFisico" value="'+(fv('avanceFisico')||'0')+'" />' +
     '<div style="margin:14px 0 8px;font-size:11px;font-weight:600;color:var(--gris2)">Registro de Pagos</div>' +
     '<div id="pagos-container"></div>' +
     '<button class="add-row-btn" onclick="addPago()"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Agregar Pago</button>' +
@@ -732,7 +724,7 @@ async function doLogin() {
     if (!currentUser.esAdmin && !currentUser.esGlobalViewer) {
       document.querySelectorAll('.nav-item[id^="nav-"]').forEach(function(el) {
         var v = el.id.replace('nav-', '');
-        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos') el.style.display = 'none';
+        if (v !== 'dashboard' && v !== efectiveUnidad && v !== 'usuarios' && v !== 'formatos' && v !== 'mapa') el.style.display = 'none';
       });
     }
 
@@ -1001,6 +993,23 @@ function renderDashboard() {
 //  Retorna objeto { canAdd, canEdit, canDelete } para un proyecto p
 //  Si p es null, evalúa permisos de "nuevo proyecto"
 // ═══════════════════════════════════════════════════════════
+// Coordinador del proyecto O admin puede subir fotos, registrar avances y generar reportes
+function _puedeOperar(p) {
+  if (!currentUser || !p) return false;
+  if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
+  function norm(s){ return (s||'').toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' '); }
+  var nombre = norm(currentUser.nombre);
+  var email  = norm(currentUser.email);
+  var coord  = norm(p.coordinador);
+  if (!coord) return false;
+  if (coord.includes(nombre) || nombre.includes(coord)) return true;
+  if (email && coord.includes(email)) return true;
+  var partsN = nombre.split(' ').filter(function(t){ return t.length>2; });
+  var partsC = coord.split(' ').filter(function(t){ return t.length>2; });
+  return partsN.some(function(t){ return partsC.includes(t); });
+}
+
+
 function getPerms(unidadKey, p) {
   var cu = currentUser;
   if (!cu) return { canAdd:false, canEdit:false, canDelete:false };
@@ -1289,6 +1298,246 @@ function dpRow(label, val) {
 function toggleHistDetail(id) {
   var el = document.getElementById(id);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SISTEMA DE AVANCES SEMANALES CON KM
+// ═══════════════════════════════════════════════════════════
+var STORAGE_URL = SUPA_PROJECT + '/storage/v1';
+var BUCKET      = 'fotos-proyectos';
+
+function _puedeOperar(p) {
+  if (!currentUser || !p) return false;
+  if (currentUser.esAdmin || currentUser.esGlobalAdmin || currentUser.esUnidadAdmin) return true;
+  function norm(s){ return (s||'').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' '); }
+  var nombre = norm(currentUser.nombre);
+  var email  = norm(currentUser.email);
+  var coord  = norm(p.coordinador);
+  if (!coord) return false;
+  if (coord.includes(nombre) || nombre.includes(coord)) return true;
+  if (email && coord.includes(email)) return true;
+  var pN = nombre.split(' ').filter(function(t){ return t.length>2; });
+  var pC = coord.split(' ').filter(function(t){ return t.length>2; });
+  return pN.some(function(t){ return pC.includes(t); });
+}
+
+function _renderAvancesLista(p, u, idx) {
+  var registros = p.registrosAvance || [];
+  if (!registros.length) return '<div style="font-size:11px;color:var(--gris3);text-align:center;padding:12px 0;">Sin registros de avance.</div>';
+  var kmTotal = parseFloat(p.longitud) || 0;
+  var totalKm = registros.reduce(function(a,r){ return a+(parseFloat(r.kmIntervenidos)||0); },0);
+  var lastAf  = parseFloat(registros[registros.length-1].avanceFisico)||0;
+  var banner = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">' +
+    '<div style="text-align:center;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:8px 4px;"><div style="font-size:9px;color:var(--az2);font-weight:600;">Registros</div><div style="font-size:16px;font-weight:300;color:var(--az1);font-family:var(--mono);">'+registros.length+'</div></div>' +
+    '<div style="text-align:center;background:var(--verde-l);border:1px solid #b7e4cc;border-radius:6px;padding:8px 4px;"><div style="font-size:9px;color:var(--verde);font-weight:600;">KM acumulados</div><div style="font-size:16px;font-weight:300;color:var(--verde);font-family:var(--mono);">'+totalKm.toFixed(2)+(kmTotal>0?' / '+kmTotal.toFixed(2):'')+'</div></div>' +
+    '<div style="text-align:center;background:var(--az7);border:1px solid var(--az6);border-radius:6px;padding:8px 4px;"><div style="font-size:9px;color:var(--az2);font-weight:600;">Avance actual</div><div style="font-size:16px;font-weight:300;color:var(--az2);font-family:var(--mono);">'+lastAf.toFixed(1)+'%</div></div>' +
+  '</div>';
+  var lista = registros.slice().reverse().map(function(r, ri) {
+    var rIdx = registros.length-1-ri;
+    var km = parseFloat(r.kmIntervenidos)||0;
+    var afAnt = rIdx>0 ? (parseFloat(registros[rIdx-1].avanceFisico)||0) : 0;
+    var delta = parseFloat(r.avanceFisico)-afAnt;
+    var kmAcum = registros.slice(0,rIdx+1).reduce(function(a,rr){ return a+(parseFloat(rr.kmIntervenidos)||0); },0);
+    return '<div class="avance-registro">' +
+      '<div class="avance-registro-header">' +
+        '<div><span class="avance-registro-fecha">'+(r.fechaCorte||'—')+'</span><span class="avance-registro-autor"> · '+(r.registradoPor||'')+'</span></div>' +
+        '<div style="display:flex;align-items:center;gap:6px;">' +
+          '<span class="avance-fis-badge">Fís: '+parseFloat(r.avanceFisico||0).toFixed(1)+'% '+(delta!==0?'<span style="font-size:9px;">'+(delta>0?'▲':'▼')+Math.abs(delta).toFixed(1)+'</span>':'')+'</span>' +
+          (km>0?'<span style="font-size:10px;font-weight:600;color:var(--verde);background:var(--verde-l);padding:2px 8px;border-radius:8px;">'+km.toFixed(2)+' km</span>':'') +
+          (kmAcum>0?'<span style="font-size:9px;color:var(--gris3);">acum: '+kmAcum.toFixed(2)+' km</span>':'') +
+          (_puedeOperar(p)?'<button onclick="generarReporteAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--az2);cursor:pointer;font-family:var(--font);">Reporte</button>':'') +
+          (currentUser&&(currentUser.esAdmin||currentUser.esGlobalAdmin)?'<button onclick="eliminarRegistroAvance(\''+u+'\','+idx+','+rIdx+')" style="background:none;border:1px solid var(--rojo-l);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--rojo);cursor:pointer;font-family:var(--font);">✕</button>':'') +
+        '</div>' +
+      '</div>' +
+      (r.observaciones?'<div class="avance-registro-obs">'+r.observaciones+'</div>':'') +
+    '</div>';
+  }).join('');
+  return banner + lista;
+}
+
+function abrirRegistroAvance(u, idx) {
+  var p = DB[u]&&DB[u][idx]; if(!p) return;
+  var esSup = p.tipoProyecto==='supervision';
+  var nc = esSup?(p.noContratoSup||'—'):(p.noContrato||'—');
+  var kmTotal = parseFloat(p.longitud)||0;
+  var kmAcum  = (p.registrosAvance||[]).reduce(function(a,r){ return a+(parseFloat(r.kmIntervenidos)||0); },0);
+  var afActual= parseFloat(p.avanceFisico)||0;
+  var hoy = new Date().toISOString().slice(0,10);
+  document.getElementById('modalTitle').textContent = 'Registrar Avance — '+nc;
+  document.getElementById('modalBody').innerHTML =
+    '<div style="font-size:11px;color:var(--gris3);margin-bottom:12px;">'+
+      '<strong style="color:var(--az1);">'+(p.proyecto||'').slice(0,70)+'</strong>'+
+      (kmTotal>0?' <span style="color:var(--verde);">('+kmTotal.toFixed(2)+' km totales · '+kmAcum.toFixed(2)+' km acum.)</span>':'')+
+    '</div>'+
+    '<div class="form-grid g2" style="margin-bottom:12px;">'+
+      '<div class="form-group"><label>Fecha de Corte <span class="req">*</span></label><input type="date" id="av-fecha" value="'+hoy+'"/></div>'+
+      '<div class="form-group"><label>KM Intervenidos <span class="req">*</span></label>'+
+        '<div style="display:flex;align-items:center;gap:8px;"><input type="number" id="av-km" min="0" step="0.01" placeholder="0.00" style="flex:1;" oninput="_avKmUpdate()"/><span style="font-size:12px;color:var(--gris3);">km</span></div>'+
+        (kmTotal>0?'<div style="font-size:10px;color:var(--gris3);margin-top:3px;">Total: '+kmTotal.toFixed(2)+' km · Acum: '+kmAcum.toFixed(2)+' km</div>':'')+
+      '</div>'+
+    '</div>'+
+    '<div style="background:var(--az7);border:1px solid var(--az6);border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">'+
+      '<div><div style="font-size:10px;font-weight:600;color:var(--az2);text-transform:uppercase;margin-bottom:2px;">Avance Físico calculado</div>'+
+      '<div style="font-size:10px;color:var(--gris3);">'+(kmTotal>0?'KM acumulados / KM total del proyecto':'Sin longitud definida')+'</div></div>'+
+      '<div style="display:flex;align-items:center;gap:10px;">'+
+        '<div style="width:120px;height:8px;background:var(--gris5);border-radius:4px;overflow:hidden"><div id="av-bar" style="height:100%;background:var(--az3);border-radius:4px;transition:.3s;width:'+Math.min(afActual,100)+'%"></div></div>'+
+        '<span id="av-bar-lbl" style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--az2);min-width:48px;text-align:right">'+afActual.toFixed(1)+'%</span>'+
+        '<input type="hidden" id="av-fisico" value="'+afActual.toFixed(1)+'"/>'+
+      '</div>'+
+    '</div>'+
+    '<div class="form-group" style="margin-bottom:12px;"><label>Observaciones</label><textarea id="av-obs" rows="2" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:8px 11px;font-size:12px;font-family:var(--font);resize:vertical;outline:none;"></textarea></div>'+
+    '<div class="form-group"><label>Fotos de este avance</label>'+
+      '<div id="av-fotos-preview" class="fotos-grid" style="min-height:44px;background:var(--gris6);border-radius:6px;border:1px dashed var(--border);padding:8px;margin-bottom:8px;"><div style="font-size:11px;color:var(--gris3);text-align:center;padding:4px;">Sin fotos seleccionadas</div></div>'+
+      '<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--az2);font-weight:600;padding:6px 14px;border:1px solid var(--az5);border-radius:6px;background:var(--az7);">'+
+        '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3.5 4.5l3-3 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 10v1a1 1 0 001 1h9a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>'+
+        'Seleccionar fotos...'+
+        '<input type="file" id="av-fotos-input" accept="image/*" multiple style="display:none" onchange="_avFotosPreview(this)"/>'+
+      '</label>'+
+    '</div>';
+  window._avEditRef = { u:u, idx:idx };
+  var btn = document.querySelector('.modal-footer .btn-primary');
+  if (btn) { btn.innerHTML = 'Guardar Avance'; btn.onclick = _guardarRegistroAvance; btn.style.display=''; }
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function _avKmUpdate() {
+  var kmNuevo = parseFloat((document.getElementById('av-km')||{}).value)||0;
+  var ref = window._avEditRef; if(!ref) return;
+  var p = DB[ref.u]&&DB[ref.u][ref.idx]; if(!p) return;
+  var kmTotal = parseFloat(p.longitud)||0;
+  var kmAcum  = (p.registrosAvance||[]).reduce(function(a,r){ return a+(parseFloat(r.kmIntervenidos)||0); },0);
+  var avFis = kmTotal>0 ? Math.min(100,Math.round((kmAcum+kmNuevo)/kmTotal*1000)/10) : parseFloat(p.avanceFisico)||0;
+  var bar=document.getElementById('av-bar'), lbl=document.getElementById('av-bar-lbl'), hid=document.getElementById('av-fisico');
+  if(bar) bar.style.width=Math.min(avFis,100)+'%';
+  if(lbl) lbl.textContent=avFis.toFixed(1)+'%';
+  if(hid) hid.value=avFis.toFixed(1);
+}
+
+var _avFotosSeleccionadas=[];
+function _avFotosPreview(input) {
+  _avFotosSeleccionadas=Array.from(input.files);
+  var prev=document.getElementById('av-fotos-preview'); if(!prev) return;
+  if(!_avFotosSeleccionadas.length){ prev.innerHTML='<div style="font-size:11px;color:var(--gris3);text-align:center;padding:4px;">Sin fotos</div>'; return; }
+  prev.innerHTML='';
+  _avFotosSeleccionadas.forEach(function(file){
+    var r=new FileReader(); r.onload=function(e){ var d=document.createElement('div'); d.className='foto-item'; d.innerHTML='<img src="'+e.target.result+'" class="foto-thumb" style="height:80px;"/>'; prev.appendChild(d); }; r.readAsDataURL(file);
+  });
+}
+
+async function _comprimirImagen(file,maxW,cal) {
+  return new Promise(function(res){ var r=new FileReader(); r.onload=function(e){ var img=new Image(); img.onload=function(){ var ratio=Math.min(maxW/img.width,maxW/img.height,1); var c=document.createElement('canvas'); c.width=Math.round(img.width*ratio); c.height=Math.round(img.height*ratio); c.getContext('2d').drawImage(img,0,0,c.width,c.height); c.toBlob(res,'image/jpeg',cal); }; img.src=e.target.result; }; r.readAsDataURL(file); });
+}
+
+async function _guardarRegistroAvance() {
+  var ref=window._avEditRef; if(!ref) return;
+  var p=DB[ref.u]&&DB[ref.u][ref.idx]; if(!p) return;
+  var fecha=(document.getElementById('av-fecha')||{}).value||'';
+  var kmInt=parseFloat((document.getElementById('av-km')||{}).value)||0;
+  var avFis=parseFloat((document.getElementById('av-fisico')||{}).value)||0;
+  var obs=(document.getElementById('av-obs')||{}).value||'';
+  if(!fecha){ showToast('Indique la fecha de corte.','err'); return; }
+  if(kmInt<=0){ showToast('Ingrese los KM intervenidos.','err'); return; }
+  var btn=document.querySelector('.modal-footer .btn-primary');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando...'; }
+  var esSup=p.tipoProyecto==='supervision';
+  var noContr=((esSup?(p.noContratoSup||''):(p.noContrato||''))||p.nProceso||'sin-id').replace(/[^a-zA-Z0-9-]/g,'_');
+  var fotosSubidas=[];
+  for(var fi=0;fi<_avFotosSeleccionadas.length;fi++){
+    var file=_avFotosSeleccionadas[fi];
+    var ext=file.name.split('.').pop().toLowerCase()||'jpg';
+    var path='avances/'+noContr+'/'+fecha.replace(/-/g,'')+'_'+fi+'.'+ext;
+    var blob=file.size>2*1024*1024?await _comprimirImagen(file,1200,0.82):file;
+    try{
+      var resp=await fetch(STORAGE_URL+'/object/'+BUCKET+'/'+path,{ method:'POST', headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,'Content-Type':file.type||'image/jpeg','x-upsert':'true'}, body:blob });
+      if(resp.ok) fotosSubidas.push({url:SUPA_PROJECT+'/storage/v1/object/public/'+BUCKET+'/'+path,path:path,descripcion:'Avance '+fecha});
+    }catch(e){console.warn(e);}
+  }
+  var registro={id:Date.now(),fechaCorte:fecha,avanceFisico:avFis,kmIntervenidos:kmInt,observaciones:obs,fotos:fotosSubidas,registradoPor:currentUser?(currentUser.nombre||currentUser.email):'Usuario',creadoEn:new Date().toISOString()};
+  var registros=p.registrosAvance||[];
+  registros.push(registro);
+  p.registrosAvance=registros;
+  p.avanceFisico=String(avFis);
+  // Guardar en Supabase
+  var sid=p._sid||(p.data&&p.data._sid);
+  if(!sid){
+    try{ var q=await fetch(SUPA_URL+'/proyectos?unidad=eq.'+ref.u+'&data->>nProceso=eq.'+encodeURIComponent(p.nProceso)+'&select=id',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken}}); var rows=await q.json(); if(rows&&rows.length) sid=rows[0].id; }catch(e){}
+  }
+  var guardado=false;
+  if(sid){
+    try{
+      var pResp=await fetch(SUPA_URL+'/proyectos?id=eq.'+sid,{ method:'PATCH', headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,'Content-Type':'application/json','Prefer':'return=minimal'}, body:JSON.stringify({data:Object.assign({},p),avance_fisico:avFis}) });
+      if(pResp.ok){ DB[ref.u][ref.idx]=Object.assign({},p); guardado=true; }
+    }catch(e){}
+  }
+  closeModal(); _avFotosSeleccionadas=[];
+  if(guardado){
+    showToast('Avance registrado correctamente.','ok');
+    var la=document.getElementById('avances-lista-'+ref.u+'-'+ref.idx);
+    if(la) la.innerHTML=_renderAvancesLista(p,ref.u,ref.idx);
+    var sec=document.getElementById('dp-avances-'+ref.u+'-'+ref.idx);
+    if(sec){ var t=sec.querySelector('.dp-section-title span'); if(t) t.textContent='Registros de Avance ('+registros.length+')'; }
+  } else showToast('Error al guardar. Intente de nuevo.','err');
+  if(btn){ btn.disabled=false; btn.onclick=saveProject; }
+}
+
+async function eliminarRegistroAvance(u,idx,rIdx){
+  if(!confirm('¿Eliminar este registro? No se puede deshacer.')) return;
+  var p=DB[u]&&DB[u][idx]; if(!p||!p.registrosAvance) return;
+  var reg=p.registrosAvance[rIdx]; if(!reg) return;
+  var fotos=reg.fotos||[];
+  for(var fi=0;fi<fotos.length;fi++){
+    try{ await fetch(STORAGE_URL+'/object/'+BUCKET+'/'+fotos[fi].path,{method:'DELETE',headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken}}); }catch(e){}
+  }
+  p.registrosAvance.splice(rIdx,1);
+  if(p.registrosAvance.length>0){ var ult=p.registrosAvance[p.registrosAvance.length-1]; p.avanceFisico=String(parseFloat(ult.avanceFisico)||0); }
+  var sid=p._sid||(p.data&&p.data._sid);
+  if(sid){
+    try{ await fetch(SUPA_URL+'/proyectos?id=eq.'+sid,{method:'PATCH',headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+currentToken,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({data:Object.assign({},p),avance_fisico:parseFloat(p.avanceFisico)||0})}); DB[u][idx]=Object.assign({},p); }catch(e){}
+  }
+  var la=document.getElementById('avances-lista-'+u+'-'+idx);
+  if(la) la.innerHTML=_renderAvancesLista(p,u,idx);
+  showToast('Registro eliminado.','ok');
+}
+
+function generarReporteAvance(u,idx,rIdx){
+  var p=DB[u]&&DB[u][idx]; if(!p) return;
+  var r=p.registrosAvance&&p.registrosAvance[rIdx]; if(!r) return;
+  var esSup=p.tipoProyecto==='supervision';
+  var nc=esSup?(p.noContratoSup||'—'):(p.noContrato||'—');
+  var empresa=esSup?(p.supervisora||'—'):(p.constructora||'—');
+  var fecha=new Date().toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'});
+  var af=parseFloat(r.avanceFisico)||0;
+  var afAnt=rIdx>0?(parseFloat(p.registrosAvance[rIdx-1].avanceFisico)||0):0;
+  var kmE=parseFloat(r.kmIntervenidos)||0;
+  var kmAcum=p.registrosAvance.slice(0,rIdx+1).reduce(function(a,rr){ return a+(parseFloat(rr.kmIntervenidos)||0); },0);
+  var kmTot=parseFloat(p.longitud)||0;
+  function fL(n){ var v=parseFloat(n); return isNaN(v)?'—':'L '+v.toLocaleString('es-HN',{minimumFractionDigits:2}); }
+  function svgBar(pct,color){ var w=Math.min(Math.max(pct,0),100)*3; return '<svg width="300" height="18" viewBox="0 0 300 18"><rect width="300" height="18" rx="9" fill="#e8ecf0"/><rect width="'+w+'" height="18" rx="9" fill="'+color+'"/><text x="150" y="13" text-anchor="middle" font-size="10" fill="white" font-family="Arial" font-weight="bold">'+pct.toFixed(1)+'%</text></svg>'; }
+  var fotosHtml=(r.fotos||[]).map(function(f,fi){ return '<div style="break-inside:avoid"><img src="'+f.url+'" style="width:100%;height:160px;object-fit:cover;border-radius:6px;border:1px solid #D0DCE6;"/><div style="font-size:8pt;color:#7B8FA0;text-align:center;margin-top:4px;">'+(f.descripcion||'Foto '+(fi+1))+'</div></div>'; }).join('');
+  var histRows=p.registrosAvance.map(function(reg,ri){
+    var d=parseFloat(reg.avanceFisico||0)-(ri>0?parseFloat(p.registrosAvance[ri-1].avanceFisico)||0:0);
+    var kA=p.registrosAvance.slice(0,ri+1).reduce(function(a,rr){ return a+(parseFloat(rr.kmIntervenidos)||0); },0);
+    return '<tr style="'+(ri===rIdx?'background:#EDF5FC;font-weight:700;':'')+'"><td>'+(ri+1)+'</td><td>'+reg.fechaCorte+'</td><td style="font-family:monospace;color:#1268C4;">'+parseFloat(reg.avanceFisico||0).toFixed(1)+'%</td><td style="color:'+(d>=0?'#0D7A4E':'#C0392B')+'">'+(d>=0?'▲':'▼')+Math.abs(d).toFixed(1)+'%</td><td style="font-family:monospace;">'+(parseFloat(reg.kmIntervenidos||0)>0?parseFloat(reg.kmIntervenidos).toFixed(2)+' km':'—')+'</td><td style="font-family:monospace;">'+(kA>0?kA.toFixed(2)+' km':'—')+'</td><td>'+reg.registradoPor+'</td></tr>';
+  }).join('');
+  var html='<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><title>Avance '+nc+' — '+r.fechaCorte+'</title>'+
+  '<style>body{font-family:Arial,sans-serif;color:#1C2B3A;font-size:11pt;margin:0;}.page{max-width:750px;margin:0 auto;padding:24px 32px;}.header{background:linear-gradient(135deg,#001233,#002B6B);color:#fff;padding:0;border-bottom:4px solid #D4A820;display:flex;}.hl{padding:18px 22px;flex:1;}.hr{padding:18px 22px;text-align:right;}.inst{font-size:8pt;opacity:.7;margin-bottom:1px;}.sec-t{font-size:9pt;font-weight:700;color:#002B6B;padding:6px 12px;background:#EDF5FC;border-left:4px solid #D4A820;margin:16px 0 0;}.sec-b{border:1px solid #D0DCE6;border-top:none;padding:12px 16px;}.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}.lbl{font-size:8pt;color:#7B8FA0;font-weight:600;text-transform:uppercase;margin-bottom:2px;}.val{font-size:10pt;color:#1C2B3A;font-weight:500;}.kpi{text-align:center;background:#f8f9fb;border-radius:6px;padding:10px 8px;border:1px solid #e0e8f0;}.kpi-l{font-size:8pt;color:#7B8FA0;margin-bottom:3px;}.kpi-v{font-size:13pt;font-weight:700;font-family:monospace;}.obs{font-size:10pt;line-height:1.6;background:#f8f9fb;border-radius:6px;padding:10px 14px;border-left:3px solid #D4A820;}table{width:100%;border-collapse:collapse;font-size:9pt;}th{background:#f0f4f8;padding:6px 10px;text-align:left;font-size:8pt;color:#7B8FA0;font-weight:700;border-bottom:2px solid #D0DCE6;}td{padding:6px 10px;border-bottom:1px solid #f0f0f0;}.footer{text-align:center;font-size:8pt;color:#aaa;margin-top:20px;padding-top:10px;border-top:1px solid #eee;}@media print{body{margin:0;}@page{margin:12mm 10mm;size:A4;}}</style></head><body><div class="page">'+
+  '<div class="header"><div class="hl"><div class="inst">República de Honduras · Secretaría de Infraestructura y Transporte</div><div class="inst">Dirección General de Conservación Vial — DGCV</div><div style="font-size:15pt;font-weight:700;margin:3px 0 2px;">Reporte de Avance</div><div style="display:inline-block;background:rgba(13,122,78,.4);color:#2ecc71;font-size:8pt;font-weight:700;padding:2px 10px;border-radius:10px;">Corte: '+r.fechaCorte+'</div></div><div class="hr"><div style="font-size:8pt;opacity:.7;">Generado el</div><div style="font-size:9pt;font-weight:600;">'+fecha+'</div><div style="font-size:12pt;font-weight:700;font-family:monospace;margin-top:8px;">'+nc+'</div></div></div>'+
+  '<div class="sec-t">Identificación</div><div class="sec-b"><div class="g2"><div><div class="lbl">Proyecto</div><div class="val">'+p.proyecto+'</div></div><div><div class="lbl">Empresa</div><div class="val">'+empresa+'</div></div><div><div class="lbl">Coordinador</div><div class="val">'+(p.coordinador||'—')+'</div></div><div><div class="lbl">Registrado por</div><div class="val">'+r.registradoPor+'</div></div></div></div>'+
+  '<div class="sec-t">Avance al '+r.fechaCorte+'</div><div class="sec-b">'+
+  '<div class="g3" style="margin-bottom:14px;">'+
+    '<div class="kpi"><div class="kpi-l">Avance Físico</div><div class="kpi-v" style="color:#1268C4;">'+af.toFixed(1)+'%</div>'+(rIdx>0?'<div style="font-size:9pt;font-weight:600;text-align:center;color:'+(af-afAnt>=0?'#0D7A4E':'#C0392B')+'">'+(af-afAnt>=0?'▲':'▼')+Math.abs(af-afAnt).toFixed(1)+'% vs anterior</div>':'')+' </div>'+
+    (kmE>0?'<div class="kpi"><div class="kpi-l">KM este período</div><div class="kpi-v" style="color:#0D7A4E;">'+kmE.toFixed(2)+' km</div></div>':'<div></div>')+
+    (kmAcum>0?'<div class="kpi"><div class="kpi-l">KM acumulados'+(kmTot>0?' / '+kmTot.toFixed(2)+' km':'')+' </div><div class="kpi-v" style="color:#002B6B;">'+kmAcum.toFixed(2)+' km</div></div>':'<div></div>')+
+  '</div>'+
+  '<div style="margin-bottom:8px;"><div class="lbl" style="margin-bottom:4px;">Avance Físico</div>'+svgBar(af,'#1268C4')+'</div>'+
+  (kmTot>0&&kmAcum>0?'<div><div class="lbl" style="margin-bottom:4px;">KM Intervenidos acumulados</div>'+svgBar(Math.min(kmAcum/kmTot*100,100),'#0D7A4E')+'</div>':'')+
+  '</div>'+
+  (r.observaciones?'<div class="sec-t">Observaciones</div><div class="sec-b"><div class="obs">'+r.observaciones+'</div></div>':'')+
+  (p.registrosAvance&&p.registrosAvance.length>1?'<div class="sec-t">Evolución del Avance</div><div class="sec-b" style="padding:0;overflow:auto;"><table><thead><tr><th>#</th><th>Fecha</th><th>Av. Físico</th><th>Delta</th><th>KM avance</th><th>KM acumulados</th><th>Registrado por</th></tr></thead><tbody>'+histRows+'</tbody></table></div>':'')+
+  (fotosHtml?'<div class="sec-t">Registro Fotográfico ('+(r.fotos||[]).length+')</div><div class="sec-b"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">'+fotosHtml+'</div></div>':'')+
+  '<div class="footer">DGCV · Reporte de Avance · '+r.fechaCorte+' · '+fecha+'</div>'+
+  '</div></body></html>';
+  var win=window.open('','_blank'); win.document.write(html); win.document.close();
 }
 
 function closeDetail(e) {
@@ -1642,8 +1891,7 @@ function saveProject() {
     if (!g('f_supervisora'))      errs.push('Empresa Supervisora');
     if (!g('f_noContratoSup'))    errs.push('N° Contrato de Supervisión');
     if (!g('f_fechaAdjudicacion'))errs.push('Fecha de Adjudicación');
-    var avF = parseFloat(g('f_avanceFisico'));
-    if (g('f_avanceFisico')===''||isNaN(avF)||avF<0||avF>100) errs.push('Avance de Ejecución (0–100%)');
+    // Avance físico se calcula automáticamente
     if (errs.length) { showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err'); return; }
 
     var cambiosSup = [];
@@ -1685,7 +1933,7 @@ function saveProject() {
       montoModificacion:    mM > 0 ? String(mM) : '',
       modificaciones:       modificaciones,
       plazo:                plazoFinal,
-      avanceFisico:         g('f_avanceFisico'),
+      avanceFisico:         g('f_avanceFisico') || '0',
       avanceFinanciero:     String(avFin),
       pagos:                pagos,
       totalDevengado:       dev.toFixed(2),
@@ -1725,8 +1973,7 @@ function saveProject() {
     if (tipoSup === 'interna' && !g('f_supervisorCampo')) errs.push('Nombre del Supervisor de Campo');
     if (tipoSup === 'externa' && contratosSupervision.length > 0 && !g('f_contratoSupervisionId')) errs.push('Contrato de Supervisión Externa');
     if (!g('f_fechaAdjudicacion')) errs.push('Fecha de Adjudicación');
-    var avF = parseFloat(g('f_avanceFisico'));
-    if (g('f_avanceFisico')===''||isNaN(avF)||avF<0||avF>100) errs.push('Avance Físico (0–100%)');
+    // Avance físico se calcula automáticamente
     if (errs.length) {
       showToast('Campos obligatorios incompletos: ' + errs.join(' · '), 'err');
       ['f_nProceso','f_estado','f_proyecto','f_descripcion','f_longitud',
@@ -1793,7 +2040,7 @@ function saveProject() {
       montoModificacion:    mM > 0 ? String(mM) : '',
       modificaciones:       modificaciones,
       plazo:                plazoFinal,
-      avanceFisico:         g('f_avanceFisico'),
+      avanceFisico:         g('f_avanceFisico') || '0',
       avanceFinanciero:     String(avFin),
       pagos:                pagos,
       totalDevengado:       dev.toFixed(2),
@@ -1961,7 +2208,7 @@ function abrirModalUsuario(id) {
       '<div class="form-grid g2" style="margin-top:12px">' +
         '<div class="form-group"><label>Contraseña inicial <span class="req">*</span></label>' +
           '<input type="password" id="u_pass" placeholder="Mínimo 8 caracteres"/>' +
-          '</div>' +
+          '<div class="form-hint">El usuario puede cambiarla usando "Reset contraseña"</div></div>' +
         '<div class="form-group"><label>Confirmar contraseña <span class="req">*</span></label>' +
           '<input type="password" id="u_pass2"/></div>' +
       '</div>'
@@ -2002,9 +2249,8 @@ async function guardarUsuario(id) {
     if (pass !== pass2)   { showToast('Las contraseñas no coinciden.', 'err'); return; }
 
     try {
-      // Llamar Edge Function crear-usuario (usa service_role)
-      var fnUrl = SUPA_PROJECT + '/functions/v1/crear-usuario';
-      var signupResp = await fetch(fnUrl, {
+      // Crear usuario via Edge Function (service_role, activo de inmediato)
+      var signupResp = await fetch(SUPA_PROJECT + '/functions/v1/crear-usuario', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentToken, 'apikey': SUPA_KEY },
         body: JSON.stringify({ email: email, password: pass, nombre: nombre, unidad: unidad, rol: rol })
@@ -2014,7 +2260,7 @@ async function guardarUsuario(id) {
         showToast('Error: ' + (signupData.error || 'No se pudo crear el usuario.'), 'err');
         return;
       }
-      showToast(signupData.message || 'Usuario ' + email + ' creado correctamente.', 'ok');
+      showToast('Usuario ' + email + ' creado correctamente.', 'ok');
       closeModal();
       document.querySelector('.modal-footer .btn-primary').onclick = saveProject;
       renderUsuariosPanel();
@@ -2045,44 +2291,33 @@ async function cambiarEstadoUsuario(id, nuevoEstado) {
   } catch(e) { showToast('Error: ' + e.message, 'err'); }
 }
 
-function abrirCambiarPass(id, email) {
-  document.getElementById('modalTitle').textContent = 'Cambiar Contraseña — ' + email;
+function abrirCambiarPass(userId, email) {
+  document.getElementById('modalTitle').textContent = 'Cambiar Contraseña';
   document.getElementById('modalBody').innerHTML =
     '<div style="font-size:12px;color:var(--gris3);margin-bottom:14px;">Usuario: <strong style="color:var(--az1);">' + email + '</strong></div>' +
-    '<div class="form-grid g1" style="gap:10px;">' +
-      '<div class="form-group"><label>Nueva contraseña <span class="req">*</span></label>' +
-        '<input type="password" id="cp_pass1" placeholder="Mínimo 8 caracteres"/></div>' +
-      '<div class="form-group"><label>Confirmar contraseña <span class="req">*</span></label>' +
-        '<input type="password" id="cp_pass2" placeholder="Repita la contraseña"/></div>' +
-    '</div>';
+    '<div class="form-group" style="margin-bottom:10px;"><label>Nueva contraseña <span class="req">*</span></label>' +
+      '<input type="password" id="cp_pass1" placeholder="Mínimo 8 caracteres"/></div>' +
+    '<div class="form-group"><label>Confirmar contraseña <span class="req">*</span></label>' +
+      '<input type="password" id="cp_pass2" placeholder="Repita la contraseña"/></div>';
   document.getElementById('modalOverlay').classList.add('open');
   var btn = document.querySelector('.modal-footer .btn-primary');
-  if (btn) {
-    btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 7l3 3 7-6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Guardar';
-    btn.onclick = function() { guardarCambioPass(id); };
-  }
+  if (btn) { btn.innerHTML = 'Guardar'; btn.onclick = function(){ guardarCambioPass(userId); }; }
 }
-
 async function guardarCambioPass(userId) {
-  var pass1 = (document.getElementById('cp_pass1') || {}).value || '';
-  var pass2 = (document.getElementById('cp_pass2') || {}).value || '';
-  if (pass1.length < 8) { showToast('La contraseña debe tener al menos 8 caracteres.', 'err'); return; }
-  if (pass1 !== pass2)  { showToast('Las contraseñas no coinciden.', 'err'); return; }
-  var fnUrl = SUPA_PROJECT + '/functions/v1/cambiar-password';
+  var p1 = (document.getElementById('cp_pass1')||{}).value||'';
+  var p2 = (document.getElementById('cp_pass2')||{}).value||'';
+  if (p1.length < 8) { showToast('Mínimo 8 caracteres.','err'); return; }
+  if (p1 !== p2)     { showToast('Las contraseñas no coinciden.','err'); return; }
   try {
-    var resp = await fetch(fnUrl, {
+    var r = await fetch(SUPA_PROJECT + '/functions/v1/cambiar-password', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentToken, 'apikey': SUPA_KEY },
-      body: JSON.stringify({ userId: userId, password: pass1 })
+      headers: { 'Content-Type':'application/json','Authorization':'Bearer '+currentToken,'apikey':SUPA_KEY },
+      body: JSON.stringify({ userId: userId, password: p1 })
     });
-    var data = await resp.json().catch(function(){ return {}; });
-    if (resp.ok && !data.error) {
-      showToast('Contraseña actualizada correctamente.', 'ok');
-      closeModal();
-    } else {
-      showToast('Error: ' + (data.error || 'No se pudo cambiar la contraseña.'), 'err');
-    }
-  } catch(e) { showToast('Error: ' + e.message, 'err'); }
+    var d = await r.json().catch(function(){ return {}; });
+    if (r.ok && !d.error) { showToast('Contraseña actualizada.','ok'); closeModal(); }
+    else showToast('Error: '+(d.error||'No se pudo cambiar.'),'err');
+  } catch(e) { showToast('Error: '+e.message,'err'); }
 }
 
 
